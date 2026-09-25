@@ -2,6 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Gemelo Digital BNO08X</title>
 
   <!-- ✅ CSS externo local -->
@@ -10,6 +11,11 @@
 <body>
 
 <button id="calibrar">Calibrar</button>
+<div id="bleControls" hidden>
+  <button id="bleConnect" type="button">Conectar Bluetooth</button>
+  <button id="bleDisconnect" type="button" hidden>Desconectar</button>
+  <span id="bleStatus" role="status">Pulsa Conectar Bluetooth</span>
+</div>
 <div id="estado" role="status">Cargando Cubone...</div>
 
 <div id="controls">
@@ -33,9 +39,29 @@
     <input type="number" id="gananciaInput" step="0.1" value="1.0">
     <span class="valor" id="valG">1.00</span>
   </div>
-  <button id="anotar">Copiar valores</button>
-  <em>Usa estos controles para ajustar el centro y calibración de orientación.</em>
-  <em>gemelo1 funciona sin internet. Si la tablet lo pregunta, elige mantener la conexión.</em>
+  <em>Calibra con la placa acostada y prueba la inclinación. El eje inicia en 115,5°; frente y lado tienen el sentido corregido para esta placa.</em>
+  <div class="ajuste-inclinacion">
+    <label for="alineacionInput">Dirección de inclinación (°):</label>
+    <input type="number" id="alineacionInput" min="-180" max="180" step="0.1" value="115.5">
+    <span id="valAlineacion">115.5°</span>
+  </div>
+  <div class="acciones-ajuste">
+    <button id="alineacionMenos" type="button">−5°</button>
+    <button id="alineacionMas" type="button">+5°</button>
+    <button id="alineacionMenos90" type="button">−90°</button>
+    <button id="alineacionMas90" type="button">+90°</button>
+    <button id="invertirAdelante" type="button" aria-pressed="true">Adelante/atrás: invertido</button>
+    <button id="invertirLado" type="button" aria-pressed="true">Izquierda/derecha: invertido</button>
+    <button id="alineacionReset" type="button">Restaurar ajuste</button>
+  </div>
+  <div id="lecturaInclinacion">Movimiento: frente 0° | lado 0°</div>
+  <button id="aprenderAdelante" type="button">Aprender inclinación adelante</button>
+  <div id="ajusteEstado" role="status">Calibra primero con la placa acostada.</div>
+  <button id="anotar" type="button">Copiar diagnóstico</button>
+  <textarea id="diagnostico" rows="7" readonly aria-label="Diagnóstico para copiar"></textarea>
+  <em>Si cambia el montaje y la inclinación vuelve a ser diagonal, pulsa «Aprender inclinación adelante» mientras inclinas la placa. Puedes ajustar el eje con ±5° o ±90° y cambiar por separado el sentido frontal y lateral. Copia el diagnóstico y pégalo en el chat si necesitas ayuda.</em>
+  <em>Los controles Rot X/Y/Z cambian la orientación manualmente.</em>
+  <em id="wifiHint">gemelo1 funciona sin internet. Si la tablet lo pregunta, elige mantener la conexión.</em>
 </div>
 
 <!-- ✅ Librerías locales (sin CDN) -->
@@ -43,7 +69,7 @@
 <script src="/GLTFLoader.js"></script>
 
 <!-- ✅ JS de la app -->
-<script src="/app.js"></script>
+<script src="/app.js?v=4"></script>
 
 </body>
 </html>
