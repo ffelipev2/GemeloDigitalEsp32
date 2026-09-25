@@ -1,0 +1,45 @@
+{
+  "version": 4,
+  "configurations": [
+    {
+      "name": "ESP32-C3 Arduino",
+      "compilerPath": "C:/Users/Felipe/AppData/Local/Arduino15/packages/esp32/tools/esp-rv32/2507/bin/riscv32-esp-elf-g++.exe",
+      "intelliSenseMode": "windows-gcc-x64",
+      "cStandard": "gnu17",
+      "cppStandard": "gnu++17",
+      "defines": [
+        "ESP32=ESP32",
+        "ARDUINO=10607",
+        "ARDUINO_ARCH_ESP32",
+        "ARDUINO_BOARD=ESP32C3_DEV",
+        "ARDUINO_VARIANT=esp32c3",
+        "ARDUINO_USB_MODE=1",
+        "ARDUINO_USB_CDC_ON_BOOT=0",
+        "F_CPU=160000000L",
+        "CORE_DEBUG_LEVEL=0"
+      ],
+      "includePath": [
+        "${workspaceFolder}",
+        "${workspaceFolder}/**",
+        "C:/Users/Felipe/AppData/Local/Arduino15/packages/esp32/hardware/esp32/3.3.2/cores/esp32/**",
+        "C:/Users/Felipe/AppData/Local/Arduino15/packages/esp32/hardware/esp32/3.3.2/variants/esp32c3/**",
+        "C:/Users/Felipe/AppData/Local/Arduino15/packages/esp32/hardware/esp32/3.3.2/libraries/**",
+        "C:/Users/Felipe/Documents/Arduino/libraries/**",
+        "C:/Users/Felipe/AppData/Local/Arduino15/packages/esp32/tools/esp32-arduino-libs/idf-release_v5.5-07e9bf49-v1/esp32c3/include/**",
+        "C:/Users/Felipe/AppData/Local/Arduino15/packages/esp32/tools/esp32-arduino-libs/idf-release_v5.5-07e9bf49-v1/esp32c3/qio_qspi/include/**"
+      ],
+      "browse": {
+        "path": [
+          "${workspaceFolder}",
+          "C:/Users/Felipe/AppData/Local/Arduino15/packages/esp32/hardware/esp32/3.3.2/cores/esp32",
+          "C:/Users/Felipe/AppData/Local/Arduino15/packages/esp32/hardware/esp32/3.3.2/variants/esp32c3",
+          "C:/Users/Felipe/AppData/Local/Arduino15/packages/esp32/hardware/esp32/3.3.2/libraries",
+          "C:/Users/Felipe/Documents/Arduino/libraries",
+          "C:/Users/Felipe/AppData/Local/Arduino15/packages/esp32/tools/esp32-arduino-libs/idf-release_v5.5-07e9bf49-v1/esp32c3/include",
+          "C:/Users/Felipe/AppData/Local/Arduino15/packages/esp32/tools/esp32-arduino-libs/idf-release_v5.5-07e9bf49-v1/esp32c3/qio_qspi/include"
+        ],
+        "limitSymbolsToIncludedHeaders": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Gemelo Digital BNO08X</title>
+
+  <!-- ✅ CSS externo local -->
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<button id="calibrar">Calibrar</button>
+<div id="estado" role="status">Cargando Cubone...</div>
+
+<div id="controls">
+  <div class="fila">
+    <label for="rotX">Rot X (pitch):</label>
+    <input type="number" id="rotX" step="0.01" value="0">
+    <span class="valor" id="valX">0.00</span>
+  </div>
+  <div class="fila">
+    <label for="rotY">Rot Y (yaw):</label>
+    <input type="number" id="rotY" step="0.01" value="0">
+    <span class="valor" id="valY">0.00</span>
+  </div>
+  <div class="fila">
+    <label for="rotZ">Rot Z (roll):</label>
+    <input type="number" id="rotZ" step="0.01" value="0">
+    <span class="valor" id="valZ">0.00</span>
+  </div>
+  <div class="fila">
+    <label for="gananciaInput">Ganancia:</label>
+    <input type="number" id="gananciaInput" step="0.1" value="1.0">
+    <span class="valor" id="valG">1.00</span>
+  </div>
+  <button id="anotar">Copiar valores</button>
+  <em>Usa estos controles para ajustar el centro y calibración de orientación.</em>
+  <em>gemelo1 funciona sin internet. Si la tablet lo pregunta, elige mantener la conexión.</em>
+</div>
+
+<!-- ✅ Librerías locales (sin CDN) -->
+<script src="/three.min.js"></script>
+<script src="/GLTFLoader.js"></script>
+
+<!-- ✅ JS de la app -->
+<script src="/app.js"></script>
+
+</body>
+</html>
