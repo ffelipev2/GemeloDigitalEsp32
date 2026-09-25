@@ -1,4 +1,5 @@
 // --- Escena básica ---
+const nativeApp = document.documentElement.classList.contains('android-app');
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -11,7 +12,7 @@ scene.add(light);
 scene.add(new THREE.AmbientLight(0x404040));
 
 const gridHelper = new THREE.GridHelper(10, 10);
-scene.add(gridHelper);
+if (!nativeApp) scene.add(gridHelper);
 
 camera.position.set(0, 2, 2);
 camera.lookAt(new THREE.Vector3(0, 1, 0));
@@ -27,6 +28,7 @@ let sensorOnline = false;
 let sensorSamplePending = false;
 let firstSensorSampleApplied = false;
 let lastReadoutTime = -Infinity;
+let autoCalibrateOnNextBleSample = nativeApp;
 
 // Convierte los ejes del BNO08x (Z vertical) a los de la escena (Y vertical).
 const sensorToScene = new THREE.Quaternion();
@@ -115,6 +117,10 @@ function acceptQuaternion(x, y, z, w) {
   if (!lastSensorQuat) lastSensorQuat = new THREE.Quaternion();
   lastSensorQuat.set(x, y, z, w).normalize();
   sensorSamplePending = true;
+  if (autoCalibrateOnNextBleSample) {
+    applyCalibration();
+    autoCalibrateOnNextBleSample = false;
+  }
   if (!sensorOnline) {
     document.getElementById('estado').textContent = 'Cubone y sensor conectados';
   }
@@ -130,24 +136,45 @@ function markSensorDisconnected() {
 }
 
 window.receiveBleQuaternion = acceptQuaternion;
-window.onBleDisconnected = markSensorDisconnected;
+window.onBleDisconnected = () => {
+  markSensorDisconnected();
+  autoCalibrateOnNextBleSample = nativeApp;
+};
 window.updateBleStatus = (message, connected) => {
   document.getElementById('bleStatus').textContent = message;
-  document.getElementById('bleConnect').disabled = connected;
-  document.getElementById('bleDisconnect').hidden = !connected;
+  const button = document.getElementById('bleConnect');
+  const busy = /^(Buscando|Conectando|Leyendo)/.test(message);
+  button.dataset.connected = String(connected);
+  button.disabled = busy;
+  button.textContent = connected
+    ? 'Desconectar'
+    : busy ? 'Conectando…'
+      : message === 'Pulsa Conectar Bluetooth' || message === 'Bluetooth desconectado'
+        ? 'Conectar Bluetooth' : 'Reintentar Bluetooth';
+  button.title = message;
 };
 
-if (window.AndroidBle) {
-  document.getElementById('bleControls').hidden = false;
-  document.getElementById('wifiHint').hidden = true;
-  document.getElementById('bleConnect').addEventListener('click', () => window.AndroidBle.connect());
-  document.getElementById('bleDisconnect').addEventListener('click', () => window.AndroidBle.disconnect());
+if (nativeApp) {
+  const button = document.getElementById('bleConnect');
+  if (window.AndroidBle) {
+    button.addEventListener('click', () => {
+      if (button.dataset.connected === 'true') {
+        window.AndroidBle.disconnect();
+      } else {
+        autoCalibrateOnNextBleSample = true;
+        window.AndroidBle.connect();
+      }
+    });
+  } else {
+    button.textContent = 'Bluetooth no disponible';
+    button.disabled = true;
+  }
 }
 
 // SSE se abre después del primer render para evitar muestras acumuladas al cargar.
 let evtSource = null;
 function connectToSensor() {
-  if (window.AndroidBle || evtSource) return;
+  if (nativeApp || evtSource) return;
   evtSource = new EventSource('/events');
   evtSource.addEventListener('quat', (event) => {
     const data = JSON.parse(event.data);
@@ -395,8 +422,8 @@ document.getElementById('anotar').addEventListener('click', async () => {
     : 'Selecciona y copia el texto del recuadro para pegarlo en el chat.';
 });
 
-// --- Botón calibrar ---
-document.getElementById('calibrar').addEventListener('click', () => {
+// --- Calibración manual en navegador y automática en Android ---
+function applyCalibration() {
   if (lastSensorQuat) {
     calibrationSensorInverse.copy(lastSensorQuat).invert();
     calibrationManualInverse.copy(manualQuaternion).invert();
@@ -414,7 +441,9 @@ document.getElementById('calibrar').addEventListener('click', () => {
     document.getElementById('estado').textContent = 'Esperando datos del sensor para calibrar';
     console.log("Esperando datos del sensor para calibrar...");
   }
-});
+}
+
+document.getElementById('calibrar').addEventListener('click', applyCalibration);
 
 // --- Redimensionar ventana ---
 window.addEventListener('resize', () => {

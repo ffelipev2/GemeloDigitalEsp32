@@ -20,6 +20,7 @@ canvas {
 }
 
 #bleControls {
+  display: none;
   position: absolute;
   top: 70px; right: 20px;
   width: 210px;
@@ -33,6 +34,37 @@ canvas {
 
 #bleControls button {
   margin: 0 4px 6px 0;
+}
+
+.android-app #controls,
+.android-app #calibrar,
+.android-app #estado {
+  display: none;
+}
+
+.android-app #bleControls {
+  display: block;
+  top: 16px;
+  right: 16px;
+  width: auto;
+  padding: 0;
+  background: transparent;
+}
+
+.android-app #bleConnect {
+  margin: 0;
+  padding: 12px 18px;
+  font-size: 16px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.55);
+}
+
+.android-app #bleStatus {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 [hidden] { display: none !important; }

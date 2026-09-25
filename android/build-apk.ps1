@@ -56,7 +56,7 @@ $keystore = Join-Path $signingRoot 'debug.keystore'
 & $aapt2 compile --dir $resources -o $compiledResources
 if ($LASTEXITCODE -ne 0) { throw 'Fallo la compilación de recursos.' }
 
-& $aapt2 link -o $unsignedApk --manifest $manifest -I $androidJar -A $assets -R $compiledResources --auto-add-overlay --min-sdk-version 23 --target-sdk-version 34 --version-code 1 --version-name 1.0 --debug-mode
+& $aapt2 link -o $unsignedApk --manifest $manifest -I $androidJar -A $assets -R $compiledResources --auto-add-overlay --min-sdk-version 23 --target-sdk-version 34 --version-code 2 --version-name 1.1 --debug-mode
 if ($LASTEXITCODE -ne 0) { throw 'Fallo el enlace del APK.' }
 
 & $javac --release 8 -classpath $androidJar -d $classesDir $javaSource

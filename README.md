@@ -73,7 +73,7 @@ El APK instalable está en [`android/GemeloDigitalBLE-debug.apk`](android/Gemelo
 
 1. Instala el APK en la tablet Android y activa Bluetooth.
 2. Abre **Gemelo Digital**, pulsa **Conectar Bluetooth** y concede el permiso solicitado. En Android 11 o anterior, activa también la ubicación del sistema para permitir la búsqueda BLE.
-3. Cuando aparezca **CuboneESP32 conectado**, deja la placa acostada y pulsa **Calibrar**. La app incluye el mismo modelo y los ajustes de inclinación del navegador.
+3. Deja la placa acostada mientras conectas. Al recibir la primera muestra, la app calibra automáticamente a Cubone para que mire a la derecha. En Android solo se muestran el modelo y un botón que cambia entre **Conectar Bluetooth** y **Desconectar**; los controles de ajuste siguen disponibles en el navegador.
 
 La conexión BLE no necesita la red `gemelo1` ni internet. El ESP32 sigue ofreciendo Wi-Fi para el navegador. La app busca el servicio BLE de este proyecto, se suscribe a las notificaciones y muestra la muestra más reciente. Si se desconecta, pulsa **Conectar Bluetooth** para volver a buscarlo.
 

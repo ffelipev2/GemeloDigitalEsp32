@@ -4,6 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Gemelo Digital BNO08X</title>
+  <script>
+    if (window.location.search === '?app=ble') {
+      document.documentElement.classList.add('android-app');
+    }
+  </script>
 
   <!-- ✅ CSS externo local -->
   <link rel="stylesheet" href="/styles.css">
@@ -11,9 +16,8 @@
 <body>
 
 <button id="calibrar">Calibrar</button>
-<div id="bleControls" hidden>
+<div id="bleControls">
   <button id="bleConnect" type="button">Conectar Bluetooth</button>
-  <button id="bleDisconnect" type="button" hidden>Desconectar</button>
   <span id="bleStatus" role="status">Pulsa Conectar Bluetooth</span>
 </div>
 <div id="estado" role="status">Cargando Cubone...</div>
@@ -69,7 +73,7 @@
 <script src="/GLTFLoader.js"></script>
 
 <!-- ✅ JS de la app -->
-<script src="/app.js?v=4"></script>
+<script src="/app.js?v=5"></script>
 
 </body>
 </html>

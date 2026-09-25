@@ -43,7 +43,7 @@ import java.util.UUID;
 
 public final class MainActivity extends Activity {
     private static final String APP_HOST = "gemelo.local";
-    private static final String APP_URL = "https://" + APP_HOST + "/index.html";
+    private static final String APP_URL = "https://" + APP_HOST + "/index.html?app=ble";
     private static final UUID SERVICE_UUID = UUID.fromString("6a59d32b-158a-4c76-8c7e-7a4a5ab48152");
     private static final UUID QUAT_UUID = UUID.fromString("6a59d32b-158a-4c76-8c7e-7a4a5ab48153");
     private static final UUID CLIENT_CONFIG_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
