@@ -5,7 +5,6 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $androidRoot = [IO.Path]::GetFullPath($PSScriptRoot)
-$repoRoot = [IO.Path]::GetFullPath((Join-Path $androidRoot '..'))
 $buildRoot = [IO.Path]::GetFullPath((Join-Path $androidRoot '.build'))
 $signingRoot = [IO.Path]::GetFullPath((Join-Path $androidRoot '.signing'))
 
@@ -43,7 +42,7 @@ Copy-Item -LiteralPath $platformJar -Destination $androidJar
 $manifest = Join-Path $androidRoot 'app\src\main\AndroidManifest.xml'
 $resources = Join-Path $androidRoot 'app\src\main\res'
 $javaSource = Join-Path $androidRoot 'app\src\main\java\com\gemelodigital\esp32\MainActivity.java'
-$assets = Join-Path $repoRoot 'data'
+$assets = Join-Path $androidRoot 'app\src\main\assets'
 $compiledResources = Join-Path $buildRoot 'resources.zip'
 $unsignedApk = Join-Path $buildRoot 'unsigned.apk'
 $alignedApk = Join-Path $buildRoot 'aligned.apk'
@@ -56,7 +55,7 @@ $keystore = Join-Path $signingRoot 'debug.keystore'
 & $aapt2 compile --dir $resources -o $compiledResources
 if ($LASTEXITCODE -ne 0) { throw 'Fallo la compilación de recursos.' }
 
-& $aapt2 link -o $unsignedApk --manifest $manifest -I $androidJar -A $assets -R $compiledResources --auto-add-overlay --min-sdk-version 23 --target-sdk-version 34 --version-code 2 --version-name 1.1 --debug-mode
+& $aapt2 link -o $unsignedApk --manifest $manifest -I $androidJar -A $assets -R $compiledResources --auto-add-overlay --min-sdk-version 23 --target-sdk-version 34 --version-code 3 --version-name 1.2 --debug-mode
 if ($LASTEXITCODE -ne 0) { throw 'Fallo el enlace del APK.' }
 
 & $javac --release 8 -classpath $androidJar -d $classesDir $javaSource

@@ -1,72 +1,59 @@
-// ===========================
-//   LIBRERÍAS
-// ===========================
 #include <Arduino.h>
 #include <Wire.h>
-#include <WiFi.h>
-#include <ESPAsyncWebServer.h>
-#include <LittleFS.h>
-#include <ArduinoJson.h>
 #include <U8g2lib.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLE2902.h>
-
 #include "SparkFun_BNO08x_Arduino_Library.h"
+
+constexpr int SDA_PIN = 5;
+constexpr int SCL_PIN = 6;
+constexpr uint16_t SENSOR_INTERVAL_MS = 20; // 50 Hz
+constexpr uint32_t BLE_INTERVAL_MS = 40;     // 25 Hz
+constexpr uint32_t IMU_RETRY_MS = 5000;
+constexpr uint32_t IMU_STALE_MS = 3000;
+
+const char* BLE_SERVICE_UUID = "6a59d32b-158a-4c76-8c7e-7a4a5ab48152";
+const char* BLE_QUAT_UUID = "6a59d32b-158a-4c76-8c7e-7a4a5ab48153";
+
+// 18 bytes: x,y,z,w float32 little-endian y contador uint16 little-endian.
+// El contador permite distinguir una lectura nueva de una muestra detenida.
+struct __attribute__((packed)) OrientationPacket {
+  float x;
+  float y;
+  float z;
+  float w;
+  uint16_t sequence;
+};
+static_assert(sizeof(OrientationPacket) == 18, "Paquete BLE inesperado");
+
 BNO08x myIMU;
-
-
-// ===========================
-//   PINES I2C ESP32-C3
-// ===========================
-#define SDA_PIN 5
-#define SCL_PIN 6
-
-
-// ===========================
-//   OLED
-// ===========================
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(
   U8G2_R0, U8X8_PIN_NONE, SCL_PIN, SDA_PIN
 );
-
-const int xOffset = 27;
-const int yOffset = 20;
-
-
-// ===========================
-//   LED AZUL
-// ===========================
-#define LED_PIN 8
-
-
-// ===========================
-//   WIFI (MODO AP)
-// ===========================
-AsyncWebServer server(80);
-AsyncEventSource events("/events");
-const char* AP_SSID = "gemelo1";
-const char* AP_PASSWORD = "12345678";
-bool imuReady = false;
-bool webServerReady = false;
-
-// Servicio BLE para la app Android. Cada notificación contiene x,y,z,w
-// como cuatro float32 little-endian (16 bytes en total).
-const char* BLE_SERVICE_UUID = "6a59d32b-158a-4c76-8c7e-7a4a5ab48152";
-const char* BLE_QUAT_UUID = "6a59d32b-158a-4c76-8c7e-7a4a5ab48153";
-const uint32_t bleIntervalMs = 40; // 25 Hz; evita acumular notificaciones.
 BLECharacteristic* bleQuaternion = nullptr;
 volatile bool bleConnected = false;
+volatile bool restartAdvertising = false;
+volatile uint32_t restartAdvertisingAt = 0;
+bool imuReady = false;
+uint16_t sequence = 0;
+uint32_t lastImuSampleMs = 0;
+uint32_t lastImuRetryMs = 0;
+uint32_t lastReportRetryMs = 0;
 uint32_t lastBleSendMs = 0;
+uint32_t lastDisplayMs = 0;
+uint32_t lastSerialMs = 0;
 
 class CuboneBleCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer* server) override {
     bleConnected = true;
+    restartAdvertising = false;
   }
 
   void onDisconnect(BLEServer* server) override {
     bleConnected = false;
-    BLEDevice::startAdvertising();
+    restartAdvertisingAt = millis() + 250;
+    restartAdvertising = true;
   }
 };
 
@@ -80,8 +67,8 @@ void startBle() {
     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
   );
   bleQuaternion->addDescriptor(new BLE2902());
-  const float identity[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-  bleQuaternion->setValue(reinterpret_cast<const uint8_t*>(identity), sizeof(identity));
+  const OrientationPacket initial = {0, 0, 0, 1, 0};
+  bleQuaternion->setValue(reinterpret_cast<const uint8_t*>(&initial), sizeof(initial));
   service->start();
   BLEAdvertising* advertising = BLEDevice::getAdvertising();
   advertising->addServiceUUID(BLE_SERVICE_UUID);
@@ -90,122 +77,90 @@ void startBle() {
   Serial.println("BLE listo: CuboneESP32");
 }
 
+void startImu() {
+  lastImuRetryMs = millis();
+  imuReady = myIMU.begin() && myIMU.enableGameRotationVector(SENSOR_INTERVAL_MS);
+  lastImuSampleMs = millis();
+  Serial.println(imuReady ? "BNO08x listo" : "BNO08x no disponible; reintentando");
+}
 
-// ===========================
-//   FRECUENCIA DEL SENSOR
-// ===========================
-const uint16_t sensorIntervalMs = 20; // 50 Hz
-
-
-// ===========================
-//   OLED — PANTALLAS
-// ===========================
-void drawAPScreen()
-{
+void drawStatus(uint32_t now) {
+  if (now - lastDisplayMs < 1000) return;
+  lastDisplayMs = now;
   u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_5x8_tr);
-
-  u8g2.setCursor(xOffset+5, yOffset + 10);
-  u8g2.print("WiFi AP listo");
-
-  u8g2.setCursor(xOffset +7, yOffset + 22);
-  u8g2.print(WiFi.softAPIP().toString());
-
+  u8g2.setFont(u8g2_font_6x10_tr);
+  u8g2.drawStr(0, 12, "CuboneESP32 BLE");
+  u8g2.drawStr(0, 28, bleConnected ? "App conectada" : "Esperando app");
+  if (!imuReady) {
+    u8g2.drawStr(0, 44, "BNO08x: error");
+  } else if (sequence == 0 || now - lastImuSampleMs > IMU_STALE_MS) {
+    u8g2.drawStr(0, 44, "BNO08x: sin datos");
+  } else {
+    u8g2.setCursor(0, 44);
+    u8g2.print("Muestras: ");
+    u8g2.print(sequence);
+  }
   u8g2.sendBuffer();
 }
 
-
-// ===========================
-//   SETUP
-// ===========================
 void setup() {
   Serial.begin(115200);
-  delay(200);
-
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
-
+  Wire.begin(SDA_PIN, SCL_PIN, 400000);
   u8g2.begin();
   u8g2.setContrast(255);
-
-  Wire.begin(SDA_PIN, SCL_PIN, 400000);
-
+  startImu();
   startBle();
-
-  // ---- WIFI MODO AP ----
-  WiFi.mode(WIFI_AP);
-  const bool wifiReady = WiFi.softAP(AP_SSID, AP_PASSWORD);
-  if (!wifiReady) {
-    Serial.println("ERROR al iniciar el AP");
-  } else {
-    Serial.print("Conectate a: ");
-    Serial.println(AP_SSID);
-    Serial.print("Abre: http://");
-    Serial.println(WiFi.softAPIP());
-    drawAPScreen();
-
-    // ---- LittleFS y servidor web ----
-    if (!LittleFS.begin(true)) {
-      Serial.println("ERROR LittleFS: no se puede servir la pagina");
-    } else {
-      server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
-      events.onConnect([](AsyncEventSourceClient* client) {
-        Serial.println("Cliente SSE conectado");
-      });
-      server.addHandler(&events);
-      server.begin();
-      webServerReady = true;
-      Serial.println("Servidor listo");
-    }
-  }
-
-  // ---- BNO08X ----
-  Serial.println("Iniciando IMU...");
-  if (myIMU.begin()) {
-    imuReady = myIMU.enableGameRotationVector(sensorIntervalMs);
-  }
-  Serial.println(imuReady ? "IMU lista" : "IMU no detectada o sin vector de rotacion");
 }
 
-
-// ===========================
-//   LOOP PRINCIPAL
-// ===========================
 void loop() {
-  if (!imuReady) {
-    delay(100);
-    return;
-  }
-
-  // Leer el BNO08x en cada vuelta evita acumular reportes antiguos.
-  if (!myIMU.getSensorEvent()) {
-    delay(1);
-    return;
-  }
-  if (myIMU.sensorValue.sensorId != SH2_GAME_ROTATION_VECTOR) return;
-
-  if (webServerReady) {
-    StaticJsonDocument<128> doc;
-    doc["x"] = myIMU.sensorValue.un.gameRotationVector.i;
-    doc["y"] = myIMU.sensorValue.un.gameRotationVector.j;
-    doc["z"] = myIMU.sensorValue.un.gameRotationVector.k;
-    doc["w"] = myIMU.sensorValue.un.gameRotationVector.real;
-
-    char buffer[128];
-    serializeJson(doc, buffer, sizeof(buffer));
-    events.send(buffer, "quat", millis());
-  }
-
   const uint32_t now = millis();
-  if (bleConnected && bleQuaternion && now - lastBleSendMs >= bleIntervalMs) {
-    const float quaternion[4] = {
+  if (restartAdvertising && static_cast<int32_t>(now - restartAdvertisingAt) >= 0) {
+    restartAdvertising = false;
+    BLEDevice::startAdvertising();
+  }
+
+  if (!imuReady) {
+    if (now - lastImuRetryMs >= IMU_RETRY_MS) startImu();
+    drawStatus(now);
+    delay(5);
+    return;
+  }
+
+  if (myIMU.wasReset()) {
+    imuReady = myIMU.enableGameRotationVector(SENSOR_INTERVAL_MS);
+    lastReportRetryMs = now;
+    Serial.println("BNO08x reiniciado; reportes reactivados");
+  }
+  if (now - lastImuSampleMs > IMU_STALE_MS && now - lastReportRetryMs > IMU_STALE_MS) {
+    imuReady = myIMU.enableGameRotationVector(SENSOR_INTERVAL_MS);
+    lastReportRetryMs = now;
+    Serial.println("BNO08x sin muestras; reportes reactivados");
+  }
+
+  if (imuReady && myIMU.getSensorEvent()
+      && myIMU.sensorValue.sensorId == SH2_GAME_ROTATION_VECTOR) {
+    lastImuSampleMs = now;
+    if (++sequence == 0) ++sequence;
+    const OrientationPacket sample = {
       myIMU.sensorValue.un.gameRotationVector.i,
       myIMU.sensorValue.un.gameRotationVector.j,
       myIMU.sensorValue.un.gameRotationVector.k,
-      myIMU.sensorValue.un.gameRotationVector.real
+      myIMU.sensorValue.un.gameRotationVector.real,
+      sequence
     };
-    bleQuaternion->setValue(reinterpret_cast<const uint8_t*>(quaternion), sizeof(quaternion));
-    bleQuaternion->notify();
-    lastBleSendMs = now;
+    // Actualizar también sin cliente permite que la app lea el valor más reciente.
+    bleQuaternion->setValue(reinterpret_cast<const uint8_t*>(&sample), sizeof(sample));
+    if (bleConnected && now - lastBleSendMs >= BLE_INTERVAL_MS) {
+      bleQuaternion->notify();
+      lastBleSendMs = now;
+    }
+    if (now - lastSerialMs >= 2000) {
+      Serial.printf("IMU #%u BLE=%d q=%.3f,%.3f,%.3f,%.3f\n",
+        sequence, bleConnected, sample.x, sample.y, sample.z, sample.w);
+      lastSerialMs = now;
+    }
   }
+
+  drawStatus(now);
+  delay(1);
 }

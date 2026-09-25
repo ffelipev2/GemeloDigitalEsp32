@@ -24,6 +24,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelUuid;
+import android.os.SystemClock;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -43,7 +44,7 @@ import java.util.UUID;
 
 public final class MainActivity extends Activity {
     private static final String APP_HOST = "gemelo.local";
-    private static final String APP_URL = "https://" + APP_HOST + "/index.html?app=ble";
+    private static final String APP_URL = "https://" + APP_HOST + "/index.html";
     private static final UUID SERVICE_UUID = UUID.fromString("6a59d32b-158a-4c76-8c7e-7a4a5ab48152");
     private static final UUID QUAT_UUID = UUID.fromString("6a59d32b-158a-4c76-8c7e-7a4a5ab48153");
     private static final UUID CLIENT_CONFIG_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
@@ -58,7 +59,39 @@ public final class MainActivity extends Activity {
     private boolean pageReady;
     private boolean scanning;
     private BluetoothLeScanner scanner;
-    private BluetoothGatt activeGatt;
+    private volatile BluetoothGatt activeGatt;
+    private volatile BluetoothGattCharacteristic quaternionCharacteristic;
+    private volatile long lastSampleAtMs;
+    private volatile long lastNotificationAtMs;
+    private volatile boolean readPending;
+    private volatile int lastSequence = -1;
+    private long feedStartedAtMs;
+    private boolean noDataShown;
+    private volatile String disconnectReason;
+
+    // Si las notificaciones se detienen, leer el último valor BLE en forma periódica.
+    private final Runnable sampleWatchdog = new Runnable() {
+        @Override
+        public void run() {
+            BluetoothGatt gatt = activeGatt;
+            BluetoothGattCharacteristic characteristic = quaternionCharacteristic;
+            if (gatt == null || characteristic == null) return;
+            long now = SystemClock.elapsedRealtime();
+            if (!noDataShown && now - feedStartedAtMs > 2500
+                    && (lastSampleAtMs == 0 || now - lastSampleAtMs > 2500)) {
+                noDataShown = true;
+                showStatus("Conectado sin datos del sensor", true);
+            }
+            if (now - lastNotificationAtMs > 500 && !readPending) {
+                try {
+                    readPending = gatt.readCharacteristic(characteristic);
+                } catch (SecurityException error) {
+                    showStatus("Falta permiso Bluetooth", false);
+                }
+            }
+            mainHandler.postDelayed(this, 250);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle state) {
@@ -221,6 +254,12 @@ public final class MainActivity extends Activity {
 
     private void connectDevice(BluetoothDevice device) {
         try {
+            quaternionCharacteristic = null;
+            lastSampleAtMs = 0;
+            lastNotificationAtMs = 0;
+            lastSequence = -1;
+            readPending = false;
+            disconnectReason = null;
             showStatus("Conectando con CuboneESP32...", false);
             activeGatt = device.connectGatt(this, false, gattCallback, BluetoothDevice.TRANSPORT_LE);
             if (activeGatt == null) showStatus("No se pudo conectar", false);
@@ -241,10 +280,20 @@ public final class MainActivity extends Activity {
                 }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
                 runOnUiThread(() -> {
-                    if (activeGatt == gatt) activeGatt = null;
+                    boolean wasActive = activeGatt == gatt;
+                    if (wasActive) {
+                        activeGatt = null;
+                        quaternionCharacteristic = null;
+                        readPending = false;
+                        mainHandler.removeCallbacks(sampleWatchdog);
+                    }
                     gatt.close();
-                    showStatus("Bluetooth desconectado", false);
-                    runScript("window.onBleDisconnected()");
+                    if (wasActive) {
+                        String reason = disconnectReason;
+                        disconnectReason = null;
+                        runScript("window.onBleDisconnected()");
+                        showStatus(reason == null ? "Bluetooth desconectado" : reason, false);
+                    }
                 });
             }
         }
@@ -257,15 +306,19 @@ public final class MainActivity extends Activity {
             }
             android.bluetooth.BluetoothGattService service = gatt.getService(SERVICE_UUID);
             BluetoothGattCharacteristic characteristic = service == null ? null : service.getCharacteristic(QUAT_UUID);
-            BluetoothGattDescriptor descriptor = characteristic == null
-                    ? null : characteristic.getDescriptor(CLIENT_CONFIG_UUID);
-            if (descriptor == null) {
+            if (characteristic == null) {
                 failConnection(gatt, "Firmware BLE incompatible: falta orientación");
+                return;
+            }
+            quaternionCharacteristic = characteristic;
+            BluetoothGattDescriptor descriptor = characteristic.getDescriptor(CLIENT_CONFIG_UUID);
+            if (descriptor == null) {
+                startDataFeed(gatt, false);
                 return;
             }
             try {
                 if (!gatt.setCharacteristicNotification(characteristic, true)) {
-                    failConnection(gatt, "No se pudo activar la orientación");
+                    startDataFeed(gatt, false);
                     return;
                 }
                 boolean started;
@@ -276,7 +329,7 @@ public final class MainActivity extends Activity {
                     descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
                     started = gatt.writeDescriptor(descriptor);
                 }
-                if (!started) failConnection(gatt, "No se pudo suscribir al sensor");
+                if (!started) startDataFeed(gatt, false);
             } catch (SecurityException error) {
                 failConnection(gatt, "Falta permiso Bluetooth");
             }
@@ -285,42 +338,100 @@ public final class MainActivity extends Activity {
         @Override
         public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
             if (!CLIENT_CONFIG_UUID.equals(descriptor.getUuid())) return;
-            if (status == BluetoothGatt.GATT_SUCCESS) showStatus("CuboneESP32 conectado", true);
-            else failConnection(gatt, "Falló la suscripción al sensor");
+            startDataFeed(gatt, status == BluetoothGatt.GATT_SUCCESS);
         }
 
         @Override
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
-            handleQuaternion(characteristic.getUuid(), characteristic.getValue());
+            handleQuaternion(gatt, characteristic.getUuid(), characteristic.getValue(), true);
         }
 
         @Override
         public void onCharacteristicChanged(BluetoothGatt gatt,
                                             BluetoothGattCharacteristic characteristic, byte[] value) {
-            handleQuaternion(characteristic.getUuid(), value);
+            handleQuaternion(gatt, characteristic.getUuid(), value, true);
+        }
+
+        @Override
+        public void onCharacteristicRead(BluetoothGatt gatt,
+                                         BluetoothGattCharacteristic characteristic, int status) {
+            readPending = false;
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                handleQuaternion(gatt, characteristic.getUuid(), characteristic.getValue(), false);
+            }
+        }
+
+        @Override
+        public void onCharacteristicRead(BluetoothGatt gatt,
+                                         BluetoothGattCharacteristic characteristic, byte[] value, int status) {
+            readPending = false;
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                handleQuaternion(gatt, characteristic.getUuid(), value, false);
+            }
         }
     };
 
-    private void handleQuaternion(UUID characteristicUuid, byte[] bytes) {
-        if (!QUAT_UUID.equals(characteristicUuid) || bytes == null || bytes.length != 16) return;
+    private void startDataFeed(BluetoothGatt gatt, boolean notificationsEnabled) {
+        runOnUiThread(() -> {
+            if (activeGatt != gatt || quaternionCharacteristic == null) return;
+            feedStartedAtMs = SystemClock.elapsedRealtime();
+            lastNotificationAtMs = notificationsEnabled ? feedStartedAtMs : 0;
+            noDataShown = false;
+            showStatus("Esperando datos del sensor", true);
+            mainHandler.removeCallbacks(sampleWatchdog);
+            mainHandler.post(sampleWatchdog);
+        });
+    }
+
+    private void handleQuaternion(BluetoothGatt gatt, UUID characteristicUuid,
+                                  byte[] bytes, boolean notification) {
+        if (activeGatt != gatt || !QUAT_UUID.equals(characteristicUuid)
+                || bytes == null || (bytes.length != 18 && bytes.length != 16)) return;
+        long now = SystemClock.elapsedRealtime();
+        if (notification) lastNotificationAtMs = now;
         ByteBuffer data = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
         float x = data.getFloat(), y = data.getFloat(), z = data.getFloat(), w = data.getFloat();
         if (Float.isNaN(x) || Float.isNaN(y) || Float.isNaN(z) || Float.isNaN(w)
                 || Float.isInfinite(x) || Float.isInfinite(y) || Float.isInfinite(z) || Float.isInfinite(w)) return;
+        if (bytes.length == 18) {
+            int sequence = data.getShort() & 0xffff;
+            if (sequence == 0 || sequence == lastSequence) return;
+            lastSequence = sequence;
+        }
+        long previous = lastSampleAtMs;
+        lastSampleAtMs = now;
         runScript("window.receiveBleQuaternion(" + x + "," + y + "," + z + "," + w + ")");
+        if (previous == 0 || now - previous > 2500) {
+            runOnUiThread(() -> {
+                if (activeGatt == gatt) {
+                    noDataShown = false;
+                    showStatus("CuboneESP32 conectado", true);
+                }
+            });
+        }
     }
 
     private void failConnection(BluetoothGatt gatt, String message) {
-        showStatus(message, false);
+        disconnectReason = message;
         try {
             gatt.disconnect();
         } catch (SecurityException error) {
             gatt.close();
+            runOnUiThread(() -> {
+                if (activeGatt == gatt) {
+                    activeGatt = null;
+                    quaternionCharacteristic = null;
+                    mainHandler.removeCallbacks(sampleWatchdog);
+                    runScript("window.onBleDisconnected()");
+                    showStatus(message, false);
+                }
+            });
         }
     }
 
     private void disconnectRequested() {
         stopScan();
+        disconnectReason = null;
         if (activeGatt == null) {
             showStatus("Bluetooth desconectado", false);
             runScript("window.onBleDisconnected()");
@@ -349,6 +460,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         stopScan();
+        mainHandler.removeCallbacks(sampleWatchdog);
         if (activeGatt != null) {
             try { activeGatt.disconnect(); } catch (SecurityException ignored) { }
             activeGatt.close();

@@ -8,11 +8,7 @@ android {
         applicationId 'com.gemelodigital.esp32'
         minSdk 23
         targetSdk 34
-        versionCode 2
-        versionName '1.1'
-    }
-
-    sourceSets {
-        main.assets.srcDirs += file('../../data')
+        versionCode 3
+        versionName '1.2'
     }
 }
