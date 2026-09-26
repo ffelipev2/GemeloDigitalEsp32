@@ -39,9 +39,11 @@ class NativeSceneView(context: Context) : SceneView(
 
         cameraNode.position = Position(0f, 1.65f, 2.8f)
         cameraNode.lookAt(Position(0f, 0.95f, 0f))
+        // Softer direct and ambient light keep the color atlas and skull details visible.
+        indirectLight?.let { it.intensity *= 0.5f }
         mainLightNode?.apply {
             lightDirection = Direction(-4f / 10.77f, -8f / 10.77f, -6f / 10.77f)
-            intensity = 80_000f
+            intensity = 40_000f
             isShadowCaster = false
         }
 
