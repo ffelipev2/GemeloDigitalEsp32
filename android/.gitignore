@@ -1,5 +1,9 @@
 .gradle/
-.idea/
+.kotlin/
+.idea/*
+!.idea/runConfigurations/
+.idea/runConfigurations/*
+!.idea/runConfigurations/app.xml
 local.properties
 app/build/
 build/

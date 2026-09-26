@@ -1,7 +1,7 @@
 package com.gemelodigital.esp32;
 
 import android.Manifest;
-import android.app.Activity;
+import androidx.activity.ComponentActivity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
@@ -18,45 +18,27 @@ import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.Context;
 import android.content.pm.PackageManager;
-import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelUuid;
 import android.os.SystemClock;
-import android.webkit.JavascriptInterface;
-import android.webkit.WebResourceRequest;
-import android.webkit.WebResourceResponse;
-import android.webkit.WebView;
-import android.webkit.WebViewClient;
-
-import org.json.JSONObject;
-
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
-import java.util.Set;
 import java.util.UUID;
 
-public final class MainActivity extends Activity {
-    private static final String APP_HOST = "gemelo.local";
-    private static final String APP_URL = "https://" + APP_HOST + "/index.html";
+public final class MainActivity extends ComponentActivity {
     private static final UUID SERVICE_UUID = UUID.fromString("6a59d32b-158a-4c76-8c7e-7a4a5ab48152");
     private static final UUID QUAT_UUID = UUID.fromString("6a59d32b-158a-4c76-8c7e-7a4a5ab48153");
     private static final UUID CLIENT_CONFIG_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
     private static final int PERMISSION_REQUEST = 10;
     private static final long SCAN_TIMEOUT_MS = 12000;
-    private static final Set<String> ASSETS = new HashSet<>(Arrays.asList(
-            "index.html", "styles.css", "app.js", "three.min.js", "GLTFLoader.js", "cubone.glb"
-    ));
-
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private WebView webView;
-    private boolean pageReady;
+    private OrientationController orientation;
+    private NativeDashboard dashboard;
+    private long lastDashboardRefresh;
     private boolean scanning;
     private BluetoothLeScanner scanner;
     private volatile BluetoothGatt activeGatt;
@@ -96,55 +78,25 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        webView = new WebView(this);
-        webView.getSettings().setJavaScriptEnabled(true);
-        webView.getSettings().setDomStorageEnabled(true);
-        webView.getSettings().setAllowFileAccess(false);
-        webView.getSettings().setAllowContentAccess(false);
-        webView.addJavascriptInterface(new BleBridge(), "AndroidBle");
-        webView.setWebViewClient(new WebViewClient() {
-            @Override
-            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                Uri uri = request.getUrl();
-                if (!"https".equals(uri.getScheme()) || !APP_HOST.equals(uri.getHost())) return null;
-                String path = uri.getPath();
-                String asset = path == null || path.equals("/") ? "index.html" : path.substring(1);
-                if (!ASSETS.contains(asset)) return null;
-                try {
-                    String mime = asset.endsWith(".js") ? "application/javascript"
-                            : asset.endsWith(".css") ? "text/css"
-                            : asset.endsWith(".glb") ? "model/gltf-binary" : "text/html";
-                    return new WebResourceResponse(mime, "UTF-8", getAssets().open(asset));
-                } catch (IOException error) {
-                    return null;
-                }
-            }
-
-            @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                return !APP_HOST.equals(request.getUrl().getHost());
-            }
-
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                pageReady = true;
-                showStatus("Pulsa Conectar Bluetooth", false);
+        orientation = new OrientationController(this,getSharedPreferences("orientation", MODE_PRIVATE));
+        dashboard = new NativeDashboard(this, orientation);
+        dashboard.setActions(new NativeDashboard.Actions() {
+            @Override public void connect() { connectRequested(); }
+            @Override public void disconnect() { disconnectRequested(); }
+        });
+        dashboard.scene.setFrameListener(time -> {
+            long now = SystemClock.uptimeMillis();
+            OrientationCore.Quat displayed = orientation.frame(now);
+            dashboard.scene.applyOrientation((float)displayed.x,(float)displayed.y,
+                    (float)displayed.z,(float)displayed.w);
+            dashboard.updateAngles(displayed, now);
+            if (now-lastDashboardRefresh >= 100) {
+                dashboard.refresh();
+                lastDashboardRefresh = now;
             }
         });
-        setContentView(webView);
-        webView.loadUrl(APP_URL);
-    }
-
-    public final class BleBridge {
-        @JavascriptInterface
-        public void connect() {
-            runOnUiThread(MainActivity.this::connectRequested);
-        }
-
-        @JavascriptInterface
-        public void disconnect() {
-            runOnUiThread(MainActivity.this::disconnectRequested);
-        }
+        setContentView(dashboard);
+        showStatus("Pulsa Conectar Bluetooth", false);
     }
 
     private boolean hasBlePermissions() {
@@ -291,7 +243,7 @@ public final class MainActivity extends Activity {
                     if (wasActive) {
                         String reason = disconnectReason;
                         disconnectReason = null;
-                        runScript("window.onBleDisconnected()");
+                        notifyDisconnected();
                         showStatus(reason == null ? "Bluetooth desconectado" : reason, false);
                     }
                 });
@@ -400,7 +352,12 @@ public final class MainActivity extends Activity {
         }
         long previous = lastSampleAtMs;
         lastSampleAtMs = now;
-        runScript("window.receiveBleQuaternion(" + x + "," + y + "," + z + "," + w + ")");
+        runOnUiThread(() -> {
+            if (activeGatt == gatt) {
+                orientation.sample(x, y, z, w);
+                dashboard.refresh();
+            }
+        });
         if (previous == 0 || now - previous > 2500) {
             runOnUiThread(() -> {
                 if (activeGatt == gatt) {
@@ -422,7 +379,7 @@ public final class MainActivity extends Activity {
                     activeGatt = null;
                     quaternionCharacteristic = null;
                     mainHandler.removeCallbacks(sampleWatchdog);
-                    runScript("window.onBleDisconnected()");
+                    notifyDisconnected();
                     showStatus(message, false);
                 }
             });
@@ -434,7 +391,7 @@ public final class MainActivity extends Activity {
         disconnectReason = null;
         if (activeGatt == null) {
             showStatus("Bluetooth desconectado", false);
-            runScript("window.onBleDisconnected()");
+            notifyDisconnected();
             return;
         }
         try {
@@ -443,18 +400,32 @@ public final class MainActivity extends Activity {
             activeGatt.close();
             activeGatt = null;
             showStatus("Bluetooth desconectado", false);
-            runScript("window.onBleDisconnected()");
+            notifyDisconnected();
         }
     }
 
     private void showStatus(String message, boolean connected) {
-        runScript("window.updateBleStatus(" + JSONObject.quote(message) + "," + connected + ")");
+        runOnUiThread(() -> {
+            if (orientation != null) {
+                orientation.updateBleStatus(message, connected);
+                dashboard.refresh();
+            }
+        });
     }
 
-    private void runScript(String script) {
+    private void notifyDisconnected() {
         runOnUiThread(() -> {
-            if (pageReady && webView != null) webView.evaluateJavascript(script, null);
+            if (orientation != null) {
+                orientation.disconnected();
+                dashboard.refresh();
+            }
         });
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (dashboard != null && dashboard.handleBack()) return;
+        super.onBackPressed();
     }
 
     @Override
@@ -466,11 +437,7 @@ public final class MainActivity extends Activity {
             activeGatt.close();
             activeGatt = null;
         }
-        pageReady = false;
-        if (webView != null) {
-            webView.destroy();
-            webView = null;
-        }
+        if (dashboard != null) dashboard.scene.destroy();
         super.onDestroy();
     }
 }
