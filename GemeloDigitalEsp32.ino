@@ -28,7 +28,9 @@ struct __attribute__((packed)) OrientationPacket {
 static_assert(sizeof(OrientationPacket) == 18, "Paquete BLE inesperado");
 
 BNO08x myIMU;
-U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(
+// OLED integrada de 72x40: el controlador aplica el desplazamiento de columnas.
+// No dibujar como 128x64 ni sumar offsets manuales sobre este controlador.
+U8G2_SSD1306_72X40_ER_F_HW_I2C u8g2(
   U8G2_R0, U8X8_PIN_NONE, SCL_PIN, SDA_PIN
 );
 BLECharacteristic* bleQuaternion = nullptr;
@@ -84,21 +86,26 @@ void startImu() {
   Serial.println(imuReady ? "BNO08x listo" : "BNO08x no disponible; reintentando");
 }
 
+void drawStatusLine(uint8_t baseline, const char* text) {
+  const int textWidth = u8g2.getStrWidth(text);
+  const int x = (static_cast<int>(u8g2.getDisplayWidth()) - textWidth) / 2;
+  u8g2.drawStr(x, baseline, text);
+}
+
 void drawStatus(uint32_t now) {
   if (now - lastDisplayMs < 1000) return;
   lastDisplayMs = now;
   u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x10_tr);
-  u8g2.drawStr(0, 12, "CuboneESP32 BLE");
-  u8g2.drawStr(0, 28, bleConnected ? "App conectada" : "Esperando app");
+  // Tres lineas con margen vertical y mensajes ajustados a los 72 pixeles de ancho.
+  u8g2.setFont(u8g2_font_5x8_tr);
+  drawStatusLine(9, "CuboneESP32");
+  drawStatusLine(21, bleConnected ? "App conectada" : "Esperando app");
   if (!imuReady) {
-    u8g2.drawStr(0, 44, "BNO08x: error");
+    drawStatusLine(33, "Sensor error");
   } else if (sequence == 0 || now - lastImuSampleMs > IMU_STALE_MS) {
-    u8g2.drawStr(0, 44, "BNO08x: sin datos");
+    drawStatusLine(33, "Sin datos IMU");
   } else {
-    u8g2.setCursor(0, 44);
-    u8g2.print("Muestras: ");
-    u8g2.print(sequence);
+    drawStatusLine(33, "Sensor activo");
   }
   u8g2.sendBuffer();
 }

@@ -5,7 +5,7 @@ Gemelo digital de orientación para un ESP32-C3 y un BNO08x. El ESP32 envía las
 ## Instalar y usar
 
 1. En Arduino IDE, instala el núcleo **ESP32** y las bibliotecas **SparkFun BNO08x Cortex Based IMU** y **U8g2**. Selecciona una placa ESP32-C3 compatible y carga [`GemeloDigitalEsp32.ino`](GemeloDigitalEsp32.ino).
-2. Conecta BNO08x y la pantalla OLED SSD1306 al bus I²C: **SDA GPIO 5**, **SCL GPIO 6**, alimentación y tierra según tus módulos. La OLED muestra si la app está conectada y si avanzan las muestras del sensor.
+2. Conecta BNO08x al bus I²C: **SDA GPIO 5**, **SCL GPIO 6**, alimentación y tierra según tu módulo. El firmware usa la OLED SSD1306 integrada de **72 × 40 píxeles** en esos mismos pines. Muestra la conexión y el estado del sensor (**Sensor activo**, **Sin datos IMU** o **Sensor error**) en tres líneas centradas con fuente 5 × 8. El [controlador de U8g2 para 72 × 40](https://github.com/olikraus/u8g2/wiki/u8g2setupcpp#ssd1306-72x40_er) aplica el desplazamiento del panel; no se usan coordenadas de una pantalla 128 × 64.
 3. Instala [`android/GemeloDigitalBLE-debug.apk`](android/GemeloDigitalBLE-debug.apk) en la tablet, activa Bluetooth y abre **Gemelo Digital**.
 4. La app abre directamente el visor, también en la primera instalación. **Conectar** y **Calibrar** son acciones opcionales: elige cuándo usarlas. Toca la tarjeta **Bluetooth** para conectar y concede el permiso solicitado. También puedes usar **Conectar Bluetooth** dentro del asistente o del menú de ajustes.
 5. El modelo se mueve en cuanto llegan lecturas del sensor, incluso sin calibración. En ese caso usa los ejes nominales del BNO08x y toma la primera lectura de cada conexión como referencia temporal, sin guardar una calibración. Cuando quieras adaptar los ejes al montaje físico, toca **Calibrar**. El asistente pedirá tres posturas del dispositivo: neutra, inclinado hacia adelante e inclinado hacia la derecha. Mantén cada postura quieta y pulsa **Continuar**. Antes de inclinarlo a la derecha, vuelve a la postura neutra. Puedes salir con **Cancelar** o **Atrás**, incluso sin una calibración previa; el panel deja accesibles los controles del visor.
@@ -25,8 +25,8 @@ En Android 11 o anterior, activa también la ubicación del sistema para permiti
 
 ## Si Cubone deja de moverse
 
-- Si el botón dice **Sin datos**, revisa la OLED. **BNO08x: sin datos** indica que el sensor dejó de entregar orientación; revisa alimentación y los cables I²C. El firmware intenta reactivar los reportes automáticamente.
-- Si la OLED muestra **Muestras**, el número debe avanzar. La app usa notificaciones BLE y, si se detienen, lee directamente el último valor del sensor. Desconecta y conecta otra vez para restablecer la conexión.
+- Si el botón dice **Sin datos**, revisa la OLED. **Sin datos IMU** indica que el sensor dejó de entregar orientación; revisa alimentación y los cables I²C. El firmware intenta reactivar los reportes automáticamente.
+- Si la OLED muestra **Sensor activo**, está recibiendo orientación del BNO08x. La app usa notificaciones BLE y, si se detienen, lee directamente el último valor del sensor. Desconecta y conecta otra vez para restablecer la conexión.
 - El monitor serie a **115200 baudios** muestra cada dos segundos el número de muestra y el cuaternión transmitido. Esto permite distinguir un sensor detenido de un problema de recepción en Android.
 
 ## Archivos
