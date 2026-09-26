@@ -142,7 +142,7 @@ final class NativeDashboard extends FrameLayout {
         LinearLayout.LayoutParams helpParams=(LinearLayout.LayoutParams)settingsScroll.getLayoutParams(); helpParams.weight=1;
         settingsScroll.setLayoutParams(helpParams);
         LinearLayout settingsBody=column(); settingsScroll.addView(settingsBody,new ScrollView.LayoutParams(-1,-2));
-        settingsBody.addView(label("Toca la tarjeta Bluetooth para conectar o desconectar el ESP32. El modelo se mueve al recibir datos, incluso sin calibrar. Calibrar adapta los ejes al montaje; Cero usa la posición inicial guardada.",13,0xffb7c8dc,false),
+        settingsBody.addView(label("Toca la tarjeta Bluetooth para conectar o desconectar el ESP32. El modelo se mueve al recibir datos, incluso sin calibrar. Calibrar adapta los ejes al montaje. Cero centra desde la postura actual; con calibración usa la posición inicial guardada.",13,0xffb7c8dc,false),
                 spaced(-1,-2,0,dp(12)));
         settingsBody.addView(label("+ y − acercan o alejan el modelo y guardan el tamaño para la próxima apertura. Vista 3D abre el modelo en pantalla completa. El botón de ejes muestra la referencia espacial.",13,0xffb7c8dc,false),
                 spaced(-1,-2,0,0));
@@ -231,7 +231,9 @@ final class NativeDashboard extends FrameLayout {
         text(calibrationBadge,orientation.calibration==null?"Sin calibrar":"Calibrada");
         badgeState(calibrationBadge,orientation.calibration==null?0xff52351a:0xff064c39,orientation.calibration==null?0xffffc174:0xff28dc92);
         calibrateButton.setEnabled(orientation.wizardStep<0);
-        zeroButton.setEnabled(orientation.calibration!=null && orientation.wizardStep<0 && orientation.hasFreshSample());
+        zeroButton.setEnabled(orientation.wizardStep<0 && orientation.hasFreshSample());
+        zeroButton.setContentDescription(orientation.calibration==null?
+                "Usar la orientación actual como cero temporal":"Volver a cero según la posición inicial guardada");
         int step=orientation.wizardStep;
         if (step>=0) {
             String[] titles={"Coloca el sensor en posición inicial","Inclina el sensor hacia adelante","Inclina el sensor hacia la derecha","Calibración completada"};

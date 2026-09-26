@@ -132,9 +132,10 @@ final class OrientationController {
     }
 
     void zero() {
-        if (calibration == null || !hasFreshSample()) return;
+        if (wizardStep >= 0 || !hasFreshSample()) return;
         try {
-            reference = OrientationCore.referenceAtSavedNeutral(sensor,calibration.neutralUp);
+            // Before calibration, the current full orientation becomes this connection's zero.
+            reference = calibration == null ? sensor : OrientationCore.referenceAtSavedNeutral(sensor,calibration.neutralUp);
             updateModelOrientation(SystemClock.uptimeMillis());
             timeline.snap(target);
             zeroFeedback = "Cero actualizado";

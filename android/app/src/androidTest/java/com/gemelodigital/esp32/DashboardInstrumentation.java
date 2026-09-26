@@ -44,7 +44,10 @@ public final class DashboardInstrumentation extends Instrumentation {
         boolean hadZoom=viewerPreferences.contains("zoom.v1");
         float previousZoom=viewerPreferences.getFloat("zoom.v1",1f);
         try {
-            if("controls-motion".equals(scope)) {
+            if("zero".equals(scope)) {
+                checkZeroWithoutCalibration(preferences);
+                result.putString("stream","PASS: Cero recenters the native model without calibration in portrait/landscape, including tilted/inverted poses; relative motion continues and zero survives rotation; stale/disconnected/wizard guards and saved-calibration zero remain intact\n");
+            } else if("controls-motion".equals(scope)) {
                 checkControlsAndUncalibratedMotion(preferences);
                 result.putString("stream","PASS: settings actions fully visible and fixed while scrolling/rotating; first-connection uncalibrated quaternion motion reaches the native model in portrait/landscape; reconnect, cancellation, calibration and saved mounting remain functional\n");
             } else {
@@ -124,6 +127,79 @@ public final class DashboardInstrumentation extends Instrumentation {
             viewerEdit.commit();
         }
         finish(resultCode,result);
+    }
+
+    private void checkZeroWithoutCalibration(SharedPreferences preferences) throws Exception {
+        preferences.edit().remove(OrientationController.STORAGE_KEY).commit();
+        activity=(MainActivity)startActivitySync(new Intent(getTargetContext(),MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        dashboard=(NativeDashboard)field(activity,"dashboard"); orientation=(OrientationController)field(activity,"orientation");
+        require(orientation.calibration==null,"Uncalibrated zero fixture loaded calibration");
+        require(!((View)field(dashboard,"zeroButton")).isEnabled(),"Cero enabled without connection/data");
+        OrientationCore.Vec3 x=new OrientationCore.Vec3(1,0,0),y=new OrientationCore.Vec3(0,1,0),z=new OrientationCore.Vec3(0,0,1);
+        OrientationCore.Quat[] poses={turn(x,.8),turn(y,Math.PI),turn(z,.5).mul(turn(x,-.7))};
+        runOnMainSync(() -> { orientation.updateBleStatus("Conectado",true); sample(OrientationCore.Quat.identity()); });
+        for(int requested:new int[]{ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE}) {
+            rotate(requested); checkLayout();
+            for(OrientationCore.Quat pose:poses) {
+                for(int frame=0;frame<8;frame++) { runOnMainSync(() -> sample(pose)); SystemClock.sleep(40); }
+                require(renderedOrientation().angleTo(OrientationCore.Quat.identity())>.2,"Fixture did not move native model before Cero");
+                pressZero(pose);
+                equal(orientation.target,OrientationCore.Quat.identity(),"Cero did not reset uncalibrated target");
+                SystemClock.sleep(80); waitForIdleSync();
+                require(renderedOrientation().angleTo(OrientationCore.Quat.identity())<.005,"Cero did not center native model");
+                require(orientation.zeroFeedback.equals("Cero actualizado"),"Cero did not confirm success");
+                require(orientation.calibration==null && !preferences.contains(OrientationController.STORAGE_KEY),"Cero saved a fake calibration");
+                OrientationCore.Quat moved=pose.mul(turn(z,.4));
+                for(int frame=0;frame<8;frame++) { runOnMainSync(() -> sample(moved)); SystemClock.sleep(40); }
+                equal(orientation.target,turn(y,.4),"Motion did not use the newly selected uncalibrated zero");
+                require(renderedOrientation().angleTo(turn(y,.4))<.025,"Relative motion stopped after Cero");
+            }
+            Object reference=orientation.reference;
+            rotate(requested==ActivityInfo.SCREEN_ORIENTATION_PORTRAIT?ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE:ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+            require(orientation.connected && orientation.reference==reference,"Rotation lost uncalibrated zero/connection");
+        }
+        Object reference=orientation.reference;
+        runOnMainSync(() -> {
+            orientation.startWizard(); sample(poses[0]); dashboard.refresh();
+            require(!((View)uncheckedField(dashboard,"zeroButton")).isEnabled(),"Cero enabled during calibration");
+            orientation.zero(); require(orientation.reference==reference,"Cero changed reference during calibration");
+            orientation.cancelWizard(); orientation.lastSampleTime=SystemClock.uptimeMillis()-601; dashboard.refresh();
+            require(!((View)uncheckedField(dashboard,"zeroButton")).isEnabled(),"Cero enabled with stale data");
+            orientation.zero(); require(orientation.reference==reference,"Cero used stale orientation");
+            orientation.disconnected(); dashboard.refresh(); orientation.zero();
+            require(orientation.reference==null && !((View)uncheckedField(dashboard,"zeroButton")).isEnabled(),"Cero enabled after disconnect");
+            orientation.updateBleStatus("Conectado",true); sample(poses[1]); dashboard.refresh();
+        });
+        pressZero(poses[1]); equal(orientation.target,OrientationCore.Quat.identity(),"Cero failed after reconnect");
+        progress("Uncalibrated Cero centers model from tilted/inverted poses; motion and rotation preserve the selected zero in both layouts");
+        runOnMainSync(() -> activity.finish()); waitForIdleSync();
+        String saved="{\"version\":1,\"sensorToModel\":[0,0,0,1],\"neutralUp\":[0,0,1]}";
+        preferences.edit().putString(OrientationController.STORAGE_KEY,saved).commit();
+        activity=(MainActivity)startActivitySync(new Intent(getTargetContext(),MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        dashboard=(NativeDashboard)field(activity,"dashboard"); orientation=(OrientationController)field(activity,"orientation");
+        runOnMainSync(() -> { orientation.updateBleStatus("Conectado",true); sample(OrientationCore.Quat.identity()); });
+        Object calibration=orientation.calibration;
+        for(int requested:new int[]{ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE}) {
+            rotate(requested); pressZero(turn(z,.6));
+            equal(orientation.target,OrientationCore.Quat.identity(),"Saved calibration zero no longer centers model");
+            Object savedReference=orientation.reference;
+            pressZero(turn(z,.6).mul(turn(x,.8)));
+            require(orientation.reference==savedReference && orientation.zeroFeedback.equals("Colócalo en posición inicial"),"Saved neutral-posture restriction changed");
+            require(orientation.calibration==calibration && saved.equals(preferences.getString(OrientationController.STORAGE_KEY,null)),"Cero changed saved calibration");
+        }
+        progress("Cero keeps existing saved-neutral behavior and never uses stale/disconnected data or changes a calibration in progress");
+    }
+
+    private void pressZero(OrientationCore.Quat reading) {
+        runOnMainSync(() -> {
+            sample(reading); dashboard.refresh(); View button=(View)uncheckedField(dashboard,"zeroButton");
+            require(button.isShown() && button.isEnabled(),"Cero unavailable with fresh sample"); button.performClick();
+        });
+    }
+
+    private OrientationCore.Quat renderedOrientation() throws Exception {
+        Object pivot=field(dashboard.scene,"modelPivot"); Object q=pivot.getClass().getMethod("getQuaternion").invoke(pivot);
+        return new OrientationCore.Quat(component(q,"X"),component(q,"Y"),component(q,"Z"),component(q,"W")).normalized();
     }
 
     private void checkControlsAndUncalibratedMotion(SharedPreferences preferences) throws Exception {
@@ -215,7 +291,7 @@ public final class DashboardInstrumentation extends Instrumentation {
             require(((View)field(dashboard,"wizard")).getVisibility()==View.GONE,"First launch opened wizard");
             require(((View)field(dashboard,"modalScrim")).getVisibility()==View.GONE,"First launch blocked controls");
             require(!(Boolean)field(activity,"scanning") && field(activity,"activeGatt")==null,"First launch started Bluetooth");
-            require(!((View)field(dashboard,"zeroButton")).isEnabled(),"Zero enabled before calibration");
+            require(!((View)field(dashboard,"zeroButton")).isEnabled(),"Zero enabled without connection/data");
             screenshot(requested==ActivityInfo.SCREEN_ORIENTATION_PORTRAIT?"first-launch-portrait.png":"first-launch-landscape.png");
         }
         getUiAutomation().grantRuntimePermission(getTargetContext().getPackageName(),Manifest.permission.BLUETOOTH_SCAN);
