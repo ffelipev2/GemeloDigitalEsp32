@@ -8,7 +8,7 @@ import android.view.View;
 
 /** Native strokes matching the seven small SVG icons in the former dashboard. */
 final class NativeIcon extends View {
-    enum Shape { CUBE, TARGET, BLUETOOTH, RESET, EXPAND, ORIENTATION, SETTINGS }
+    enum Shape { CUBE, TARGET, BLUETOOTH, RESET, EXPAND, ORIENTATION, SETTINGS, AXES }
     private final Shape shape;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
@@ -59,6 +59,10 @@ final class NativeIcon extends View {
                 line(canvas,2,12,4,12); line(canvas,20,12,22,12);
                 line(canvas,4.9f,4.9f,6.3f,6.3f); line(canvas,17.7f,17.7f,19.1f,19.1f);
                 line(canvas,4.9f,19.1f,6.3f,17.7f); line(canvas,17.7f,6.3f,19.1f,4.9f); break;
+            case AXES:
+                line(canvas,12,12,12,3); line(canvas,12,12,3.5f,19); line(canvas,12,12,20.5f,19);
+                canvas.drawCircle(12,12,2.3f,paint); canvas.drawCircle(12,3,1.4f,paint);
+                canvas.drawCircle(3.5f,19,1.4f,paint); canvas.drawCircle(20.5f,19,1.4f,paint); break;
         }
         canvas.restoreToCount(save);
     }

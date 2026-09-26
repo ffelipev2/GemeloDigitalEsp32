@@ -10,6 +10,11 @@ import org.json.JSONObject;
 /** State transitions and messages translated directly from the former app.js wizard. */
 final class OrientationController {
     static final String STORAGE_KEY = "orientationCalibration.v1";
+    // Nominal BNO axes before the user calibrates: X -> model X, Y -> -Z, Z -> Y.
+    // A single proper quaternion rotation maps the sensor's Z-up frame to the viewer's Y-up frame.
+    // This temporary mapping is never stored as a user calibration.
+    private static final OrientationCore.Quat UNCALIBRATED_SENSOR_TO_MODEL =
+            OrientationCore.Quat.fromAxisAngle(new OrientationCore.Vec3(1,0,0),-Math.PI/2);
     private final SharedPreferences preferences;
     final OrientationCore.Timeline timeline = new OrientationCore.Timeline();
     OrientationCore.Calibration calibration;
@@ -33,7 +38,7 @@ final class OrientationController {
             if (deserialize(stored) != null) preferences.edit().putString(STORAGE_KEY,stored).commit();
         }
         calibration = deserialize(stored);
-        if (calibration == null) wizardStep = 0;
+        // Calibration is opt-in, including on the very first launch.
     }
 
     void updateBleStatus(String message, boolean isConnected) {
@@ -67,9 +72,12 @@ final class OrientationController {
     }
 
     private void updateModelOrientation(long now) {
-        if (calibration == null) return;
-        if (reference == null) reference = OrientationCore.referenceForConnection(sensor, calibration.neutralUp);
-        target = OrientationCore.modelMotion(sensor, reference, calibration.sensorToModel);
+        if (reference == null) {
+            // Without saved mounting data, start relative motion from the first valid reading.
+            reference = calibration == null ? sensor : OrientationCore.referenceForConnection(sensor, calibration.neutralUp);
+        }
+        OrientationCore.Quat axes = calibration == null ? UNCALIBRATED_SENSOR_TO_MODEL : calibration.sensorToModel;
+        target = OrientationCore.modelMotion(sensor, reference, axes);
         timeline.push(target, now);
     }
 
@@ -92,7 +100,7 @@ final class OrientationController {
     void startWizard() { clearSamples(); wizardStep = 0; wizardError = null; }
 
     void cancelWizard() {
-        clearSamples(); wizardStep = calibration == null ? 0 : -1; wizardError = null;
+        clearSamples(); wizardStep = -1; wizardError = null;
     }
 
     void continueWizard() {

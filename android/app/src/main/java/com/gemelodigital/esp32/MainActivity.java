@@ -18,6 +18,7 @@ import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -35,12 +36,16 @@ public final class MainActivity extends ComponentActivity {
     private static final UUID CLIENT_CONFIG_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
     private static final int PERMISSION_REQUEST = 10;
     private static final long SCAN_TIMEOUT_MS = 12000;
+    private static final long CONNECT_TIMEOUT_MS = 15000;
+    private static final long SERVICE_TIMEOUT_MS = 10000;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private OrientationController orientation;
     private NativeDashboard dashboard;
     private long lastDashboardRefresh;
     private boolean scanning;
     private BluetoothLeScanner scanner;
+    private ScanCallback activeScanCallback;
+    private Runnable connectionTimeout;
     private volatile BluetoothGatt activeGatt;
     private volatile BluetoothGattCharacteristic quaternionCharacteristic;
     private volatile long lastSampleAtMs;
@@ -49,7 +54,6 @@ public final class MainActivity extends ComponentActivity {
     private volatile int lastSequence = -1;
     private long feedStartedAtMs;
     private boolean noDataShown;
-    private volatile String disconnectReason;
 
     // Si las notificaciones se detienen, leer el último valor BLE en forma periódica.
     private final Runnable sampleWatchdog = new Runnable() {
@@ -108,6 +112,11 @@ public final class MainActivity extends ComponentActivity {
     }
 
     private void connectRequested() {
+        // The existing button also cancels a pending attempt; it must never lock the user out.
+        if (scanning || (activeGatt != null && !orientation.connected)) {
+            disconnectRequested();
+            return;
+        }
         if (!hasBlePermissions()) {
             String[] permissions = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
                     ? new String[]{Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT}
@@ -159,11 +168,15 @@ public final class MainActivity extends ComponentActivity {
                     .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build();
             scanning = true;
             showStatus("Buscando CuboneESP32...", false);
-            scanner.startScan(Collections.singletonList(filter), settings, scanCallback);
+            activeScanCallback = createScanCallback();
+            scanner.startScan(Collections.singletonList(filter), settings, activeScanCallback);
             mainHandler.postDelayed(scanTimeout, SCAN_TIMEOUT_MS);
         } catch (SecurityException error) {
-            scanning = false;
+            stopScan();
             showStatus("Falta permiso Bluetooth", false);
+        } catch (IllegalStateException error) {
+            stopScan();
+            showStatus("Bluetooth no disponible. Actívalo y vuelve a intentar.", false);
         }
     }
 
@@ -173,12 +186,12 @@ public final class MainActivity extends ComponentActivity {
         showStatus("No se encontró CuboneESP32. Revisa energía y Bluetooth.", false);
     };
 
-    private final ScanCallback scanCallback = new ScanCallback() {
+    private ScanCallback createScanCallback() { return new ScanCallback() {
         @Override
         public void onScanResult(int callbackType, ScanResult result) {
             BluetoothDevice device = result.getDevice();
             if (device != null) runOnUiThread(() -> {
-                if (!scanning) return;
+                if (!scanning || activeScanCallback != this) return;
                 stopScan();
                 connectDevice(device);
             });
@@ -187,19 +200,22 @@ public final class MainActivity extends ComponentActivity {
         @Override
         public void onScanFailed(int errorCode) {
             runOnUiThread(() -> {
+                if (!scanning || activeScanCallback != this) return;
                 stopScan();
                 showStatus("Error al buscar Bluetooth (" + errorCode + ")", false);
             });
         }
-    };
+    }; }
 
     private void stopScan() {
         mainHandler.removeCallbacks(scanTimeout);
         if (!scanning) return;
         scanning = false;
+        ScanCallback callback = activeScanCallback;
+        activeScanCallback = null;
         try {
-            if (scanner != null) scanner.stopScan(scanCallback);
-        } catch (SecurityException ignored) {
+            if (scanner != null && callback != null) scanner.stopScan(callback);
+        } catch (SecurityException | IllegalStateException ignored) {
             // El usuario pudo revocar el permiso durante el escaneo.
         }
     }
@@ -211,47 +227,60 @@ public final class MainActivity extends ComponentActivity {
             lastNotificationAtMs = 0;
             lastSequence = -1;
             readPending = false;
-            disconnectReason = null;
             showStatus("Conectando con CuboneESP32...", false);
             activeGatt = device.connectGatt(this, false, gattCallback, BluetoothDevice.TRANSPORT_LE);
-            if (activeGatt == null) showStatus("No se pudo conectar", false);
+            if (activeGatt == null) showStatus("No se pudo conectar. Vuelve a intentar.", false);
+            else armConnectionTimeout(activeGatt, CONNECT_TIMEOUT_MS,
+                    "El ESP32 no respondió. Enciéndelo y vuelve a conectar.");
         } catch (SecurityException error) {
             showStatus("Falta permiso para conectar por Bluetooth", false);
+        } catch (IllegalStateException error) {
+            showStatus("Bluetooth no disponible. Vuelve a intentar.", false);
         }
+    }
+
+    private void armConnectionTimeout(BluetoothGatt gatt, long timeoutMs, String message) {
+        cancelConnectionTimeout();
+        connectionTimeout = () -> {
+            if (activeGatt == gatt) failConnection(gatt, message);
+        };
+        mainHandler.postDelayed(connectionTimeout, timeoutMs);
+    }
+
+    private void cancelConnectionTimeout() {
+        if (connectionTimeout != null) mainHandler.removeCallbacks(connectionTimeout);
+        connectionTimeout = null;
     }
 
     private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
         @Override
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
-            if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
-                showStatus("Leyendo servicio de orientación...", false);
-                try {
-                    if (!gatt.discoverServices()) failConnection(gatt, "No se pudo leer el servicio BLE");
-                } catch (SecurityException error) {
-                    failConnection(gatt, "Falta permiso Bluetooth");
+            runOnUiThread(() -> {
+                // Late callbacks from a cancelled/timed-out GATT cannot affect a new attempt.
+                if (activeGatt != gatt) return;
+                if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
+                    showStatus("Leyendo servicio de orientación...", false);
+                    armConnectionTimeout(gatt, SERVICE_TIMEOUT_MS,
+                            "El servicio BLE no respondió. Vuelve a conectar.");
+                    try {
+                        if (!gatt.discoverServices()) failConnection(gatt, "No se pudo leer el servicio BLE");
+                    } catch (SecurityException error) {
+                        failConnection(gatt, "Falta permiso Bluetooth");
+                    }
+                } else if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
+                    failConnection(gatt, status == BluetoothGatt.GATT_SUCCESS ? "Bluetooth desconectado"
+                            : "No se pudo conectar (BLE " + status + "). Vuelve a intentar.");
                 }
-            } else if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
-                runOnUiThread(() -> {
-                    boolean wasActive = activeGatt == gatt;
-                    if (wasActive) {
-                        activeGatt = null;
-                        quaternionCharacteristic = null;
-                        readPending = false;
-                        mainHandler.removeCallbacks(sampleWatchdog);
-                    }
-                    gatt.close();
-                    if (wasActive) {
-                        String reason = disconnectReason;
-                        disconnectReason = null;
-                        notifyDisconnected();
-                        showStatus(reason == null ? "Bluetooth desconectado" : reason, false);
-                    }
-                });
-            }
+            });
         }
 
         @Override
         public void onServicesDiscovered(BluetoothGatt gatt, int status) {
+            runOnUiThread(() -> configureDataFeed(gatt, status));
+        }
+
+        private void configureDataFeed(BluetoothGatt gatt, int status) {
+            if (activeGatt != gatt) return;
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 failConnection(gatt, "No se encontró el servicio BLE");
                 return;
@@ -307,6 +336,7 @@ public final class MainActivity extends ComponentActivity {
         @Override
         public void onCharacteristicRead(BluetoothGatt gatt,
                                          BluetoothGattCharacteristic characteristic, int status) {
+            if (activeGatt != gatt) return;
             readPending = false;
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 handleQuaternion(gatt, characteristic.getUuid(), characteristic.getValue(), false);
@@ -316,6 +346,7 @@ public final class MainActivity extends ComponentActivity {
         @Override
         public void onCharacteristicRead(BluetoothGatt gatt,
                                          BluetoothGattCharacteristic characteristic, byte[] value, int status) {
+            if (activeGatt != gatt) return;
             readPending = false;
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 handleQuaternion(gatt, characteristic.getUuid(), value, false);
@@ -326,6 +357,7 @@ public final class MainActivity extends ComponentActivity {
     private void startDataFeed(BluetoothGatt gatt, boolean notificationsEnabled) {
         runOnUiThread(() -> {
             if (activeGatt != gatt || quaternionCharacteristic == null) return;
+            cancelConnectionTimeout();
             feedStartedAtMs = SystemClock.elapsedRealtime();
             lastNotificationAtMs = notificationsEnabled ? feedStartedAtMs : 0;
             noDataShown = false;
@@ -369,39 +401,30 @@ public final class MainActivity extends ComponentActivity {
     }
 
     private void failConnection(BluetoothGatt gatt, String message) {
-        disconnectReason = message;
-        try {
-            gatt.disconnect();
-        } catch (SecurityException error) {
-            gatt.close();
-            runOnUiThread(() -> {
-                if (activeGatt == gatt) {
-                    activeGatt = null;
-                    quaternionCharacteristic = null;
-                    mainHandler.removeCallbacks(sampleWatchdog);
-                    notifyDisconnected();
-                    showStatus(message, false);
-                }
-            });
-        }
+        runOnUiThread(() -> {
+            if (activeGatt != gatt) return;
+            // Release immediately; a missing disconnect callback must not block retries.
+            activeGatt = null;
+            quaternionCharacteristic = null;
+            readPending = false;
+            cancelConnectionTimeout();
+            mainHandler.removeCallbacks(sampleWatchdog);
+            try { gatt.disconnect(); } catch (SecurityException ignored) { }
+            try { gatt.close(); } catch (SecurityException ignored) { }
+            notifyDisconnected();
+            showStatus(message, false);
+        });
     }
 
     private void disconnectRequested() {
         stopScan();
-        disconnectReason = null;
         if (activeGatt == null) {
+            cancelConnectionTimeout();
             showStatus("Bluetooth desconectado", false);
             notifyDisconnected();
             return;
         }
-        try {
-            activeGatt.disconnect();
-        } catch (SecurityException error) {
-            activeGatt.close();
-            activeGatt = null;
-            showStatus("Bluetooth desconectado", false);
-            notifyDisconnected();
-        }
+        failConnection(activeGatt, "Bluetooth desconectado");
     }
 
     private void showStatus(String message, boolean connected) {
@@ -411,6 +434,14 @@ public final class MainActivity extends ComponentActivity {
                 dashboard.refresh();
             }
         });
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration configuration) {
+        super.onConfigurationChanged(configuration);
+        // A rotation only relays out the existing dashboard. Keep GATT, samples,
+        // calibration wizard and the loaded Filament model owned by this activity.
+        dashboard.onWindowChanged();
     }
 
     private void notifyDisconnected() {
@@ -431,10 +462,11 @@ public final class MainActivity extends ComponentActivity {
     @Override
     protected void onDestroy() {
         stopScan();
+        cancelConnectionTimeout();
         mainHandler.removeCallbacks(sampleWatchdog);
         if (activeGatt != null) {
             try { activeGatt.disconnect(); } catch (SecurityException ignored) { }
-            activeGatt.close();
+            try { activeGatt.close(); } catch (SecurityException ignored) { }
             activeGatt = null;
         }
         if (dashboard != null) dashboard.scene.destroy();

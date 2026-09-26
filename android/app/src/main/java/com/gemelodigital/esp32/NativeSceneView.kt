@@ -1,6 +1,7 @@
 package com.gemelodigital.esp32
 
 import android.content.Context
+import android.graphics.Rect
 import com.google.android.filament.Camera
 import com.google.android.filament.ColorGrading
 import com.google.android.filament.Skybox
@@ -12,6 +13,8 @@ import io.github.sceneview.math.Position
 import io.github.sceneview.math.Scale
 import io.github.sceneview.node.ModelNode
 import io.github.sceneview.node.Node
+import kotlin.math.atan
+import kotlin.math.tan
 
 /** The only bridge between the former Three.js world and Filament's scene graph. */
 private object SceneCoordinates {
@@ -28,6 +31,10 @@ class NativeSceneView(context: Context) : SceneView(
     fun interface FrameListener { fun onFrame(timeMillis: Long) }
     private var frameListener: FrameListener? = null
     private val modelPivot = Node(engine)
+    private val focusBounds = Rect()
+    private val viewerPreferences = context.getSharedPreferences("viewer", Context.MODE_PRIVATE)
+    private var zoom = readSavedZoom()
+    private lateinit var axes: ModelNode
 
     init {
         // Three.js used ACES filmic output with exposure 1.15. Filament's exposure is in stops.
@@ -68,18 +75,65 @@ class NativeSceneView(context: Context) : SceneView(
         guide.isTouchable = false
         addChildNode(guide)
 
+        axes = ModelNode(modelLoader.createModelInstance("model-axes.glb"), autoAnimate = false)
+        axes.isTouchable = false
+        axes.isVisible = false
+        modelPivot.addChildNode(axes)
+
         onFrame = { timeNanos -> frameListener?.onFrame(timeNanos / 1_000_000L) }
     }
 
     override fun onResized(width: Int, height: Int) {
         super.onResized(width, height)
-        if (width > 0 && height > 0) {
-            // Keep the same framing along the viewport's shorter side. A fixed vertical
-            // FOV narrows the horizontal view in portrait fullscreen and crops Cubone.
-            // Changing only the projection preserves model scale, pivot and IMU rotation.
-            val fovAxis = if (width < height) Camera.Fov.HORIZONTAL else Camera.Fov.VERTICAL
-            cameraNode.setProjection(48.0, 0.1f, 100f, fovAxis, width.toDouble() / height)
-        }
+        updateFraming(width, height)
+    }
+
+    /** Overlay bounds define the usable scene area; the SurfaceView remains full screen. */
+    fun setFocusBounds(left: Int, top: Int, right: Int, bottom: Int) {
+        focusBounds.set(left, top, right, bottom)
+        updateFraming(width, height)
+    }
+
+    fun zoomBy(delta: Float) {
+        if (delta.isFinite()) setZoom((zoom + delta).coerceIn(0.65f, 1.5f))
+    }
+
+    fun resetZoom() {
+        setZoom(1f)
+    }
+
+    private fun readSavedZoom(): Float {
+        val stored = try { viewerPreferences.getFloat("zoom.v1", 1f) }
+        catch (_: ClassCastException) { 1f }
+        return if (stored.isFinite()) stored.coerceIn(0.65f, 1.5f) else 1f
+    }
+
+    private fun setZoom(value: Float) {
+        zoom = value
+        // Persist camera zoom only. Calibration, model scale and IMU motion are independent.
+        viewerPreferences.edit().putFloat("zoom.v1", zoom).apply()
+        updateFraming(width, height)
+    }
+
+    fun setAxesVisible(visible: Boolean) { axes.isVisible = visible }
+
+    private fun updateFraming(width: Int, height: Int) {
+        if (width <= 0 || height <= 0) return
+        val bounds = if (focusBounds.isEmpty) Rect(0, 0, width, height) else focusBounds
+        val safeWidth = bounds.width().coerceAtLeast(1).toDouble()
+        val safeHeight = bounds.height().coerceAtLeast(1).toDouble()
+        // Fit the shorter side of the usable area. Camera/pivot/model scale and the
+        // IMU quaternion stay identical in portrait, landscape, expanded view and zoom.
+        val safeTan = tan(Math.toRadians(48.0) / 2.0) / zoom * maxOf(1.0, safeHeight / safeWidth)
+        val verticalFov = Math.toDegrees(2.0 * atan(safeTan * height / safeHeight))
+        cameraNode.setProjection(verticalFov, 0.1f, 100f, Camera.Fov.VERTICAL, width.toDouble() / height)
+        // Column-major OpenGL projection: shift the optical center into the free
+        // area above the status cards without translating or rotating the model.
+        val projection = DoubleArray(16)
+        cameraNode.camera.getCullingProjectionMatrix(projection)
+        projection[8] = 1.0 - 2.0 * bounds.exactCenterX() / width
+        projection[9] = 2.0 * bounds.exactCenterY() / height - 1.0
+        cameraNode.camera.setCustomProjection(projection, 0.1, 100.0)
     }
 
     fun setFrameListener(listener: FrameListener?) { frameListener = listener }
