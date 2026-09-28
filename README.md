@@ -2,6 +2,22 @@
 
 Gemelo digital de orientación para un ESP32-C3 y un BNO08x. El ESP32 envía las muestras **solo por Bluetooth Low Energy (BLE)**. La app Android dibuja a Cubone de forma nativa con SceneView y Filament; no hay red Wi-Fi, servidor web ni carga de LittleFS.
 
+## Registro fotográfico
+
+Fotos del montaje electrónico y de la figura física de Cubone junto a su representación en el visor 3D de la tablet. Los originales están en [`docs/images/`](docs/images/).
+
+| Montaje electrónico | Vista del prototipo en mano |
+| --- | --- |
+| ![Montaje en protoboard con ESP32-C3, sensor GY-BNO08X, interruptor y módulo de alimentación](docs/images/Gemelo_1.jpeg) | ![Prototipo electrónico sostenido en la mano, con la pantalla y los indicadores encendidos](docs/images/Gemelo_2.jpeg) |
+| **Foto 1.** Distribución de los componentes y cableado sobre la protoboard. | **Foto 2.** Vista del conjunto que permite apreciar su tamaño. |
+
+| Figura física y visor 3D | Vista desde otro ángulo |
+| --- | --- |
+| ![Figura física de Cubone junto a la tablet que muestra su modelo en el visor 3D](docs/images/Gemelo_3.jpeg) | ![Figura física de Cubone y su representación en la tablet vistas desde otro ángulo](docs/images/Gemelo_4.jpeg) |
+| **Foto 3.** Figura física y representación digital en el entorno de trabajo. | **Foto 4.** Otra vista de la figura y del modelo mostrado por la app. |
+
+**Versión del prototipo:** la OLED de las fotos 1 y 2 muestra el mensaje de Wi-Fi de una versión anterior. El firmware actual documentado en este repositorio transmite la orientación por BLE.
+
 ## Instalar y usar
 
 1. En Arduino IDE, instala el núcleo **ESP32** y las bibliotecas **SparkFun BNO08x Cortex Based IMU** y **U8g2**. Selecciona una placa ESP32-C3 compatible y carga [`GemeloDigitalEsp32.ino`](GemeloDigitalEsp32.ino).
@@ -37,6 +53,7 @@ android/GemeloDigitalBLE-debug.apk   App Android instalable
 android/app/src/main/assets/         Modelo Cubone y guía del suelo en GLB
 android/app/src/main/java/           Cliente BLE, calibración y visor nativo
 android/build-apk.ps1                Compilación local del APK
+docs/images/                        Fotos del prototipo y del gemelo digital
 ```
 
 La app guarda la transformación 3D de los ejes del sensor y la dirección de gravedad de la postura neutra en las preferencias de Android. Al reconectar recupera la inclinación neutra; el rumbo inicial de cada conexión se toma como cero porque el **Game Rotation Vector** del BNO08x no tiene referencia absoluta de rumbo. La animación interpola las muestras BLE con el suavizado anterior al filtro de vibración. El panel principal muestra los controles de calibración, Bluetooth y retorno a cero, el visor 3D ampliable y tarjetas con el estado y los ángulos de orientación.
