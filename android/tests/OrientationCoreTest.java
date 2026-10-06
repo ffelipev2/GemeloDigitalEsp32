@@ -48,13 +48,89 @@ public final class OrientationCoreTest {
             OrientationCore.Quat q=timeline.at(now);
             double angle=2*Math.atan2(q.y,q.w)/OrientationCore.RAD;
             if(now>200 && now<900) {
-                check(Math.abs(angle-(now-45)*.12)<2.5,"Latencia de interpolación");
+                check(Math.abs(angle-(now-65)*.12)<2.5,"Latencia de interpolación");
                 check(angle>=previous-.2 && angle-previous<4,"Salto entre cuadros");
             }
             previous=angle;
         }
         timeline.snap(OrientationCore.Quat.identity());
         equal(timeline.at(1200),OrientationCore.Quat.identity(),"Volver a cero");
-        System.out.println("24 montajes y cronología nativa equivalentes: OK");
+        for (int hz:new int[]{30,60,90,120}) {
+            checkIrregularStream(hz,1,.55);
+            checkIrregularStream(hz,2,.25);
+        }
+        checkBurstHistory();
+        checkStreamRecovery();
+        System.out.println("24 montajes; interpolación regular/irregular a 30/60/90/120 Hz; ráfagas, pausas y Cero: OK");
+    }
+
+    private static double yaw(OrientationCore.Quat q) {
+        return 2*Math.atan2(q.y,q.w)/OrientationCore.RAD;
+    }
+
+    private static void checkIrregularStream(int hz,int fixture,double variationLimit) {
+        OrientationCore.Timeline timeline=new OrientationCore.Timeline();
+        int sample=0,n=0;
+        double previous=0,sum=0,squares=0;
+        int[] delays={0,22,6,18,0,25,3,12};
+        for(int frame=0;frame<=hz*2;frame++) {
+            double now=frame*1000.0/hz;
+            while(true) {
+                double captureAt=sample*40;
+                double delay=fixture==1?(sample%2==1?30:0):delays[sample%delays.length];
+                if(captureAt+delay>now+.001) break;
+                timeline.push(turn(Y,captureAt*.12),captureAt+delay);
+                sample++;
+            }
+            OrientationCore.Quat q=timeline.at(now);
+            check(Math.abs(q.lengthSquared()-1)<1e-9,"Cuaternión normalizado");
+            double angle=yaw(q),step=angle-previous;
+            if(now>250 && now<1900) {
+                check(step>=0,"Retroceso con un giro constante");
+                check(step<2.3*(120.0/hz),"Salto excesivo con paquetes irregulares");
+                double latency=now-angle/.12;
+                check(latency>35 && latency<110,"Retardo acotado de la animación");
+                sum+=step; squares+=step*step; n++;
+            }
+            previous=angle;
+        }
+        double mean=sum/n;
+        double variation=Math.sqrt(Math.max(0,squares/n-mean*mean))/mean;
+        check(variation<variationLimit,"Velocidad irregular a "+hz+" Hz: "+variation);
+    }
+
+    private static void checkBurstHistory() {
+        OrientationCore.Timeline timeline=new OrientationCore.Timeline();
+        timeline.snap(turn(Y,0));
+        // These timestamps were captured on reception, before the main thread drained its queue.
+        timeline.push(turn(Y,0),0);
+        timeline.push(turn(Y,4),40);
+        timeline.push(turn(Y,8),80);
+        timeline.push(turn(Y,12),120);
+        double angle=yaw(timeline.at(120));
+        check(angle>0 && angle<4,"Una ráfaga descartó el segmento que aún se debía mostrar");
+        timeline.push(turn(Y,-90),100); // Delayed/out-of-order data cannot replace the newest pose.
+        for(int frame=1;frame<=20;frame++) timeline.at(120+frame*16);
+        check(Math.abs(yaw(timeline.at(500))-12)<.05,"Una muestra antigua reemplazó la orientación");
+    }
+
+    private static void checkStreamRecovery() {
+        OrientationCore.Timeline timeline=new OrientationCore.Timeline();
+        timeline.push(turn(Y,0),0);
+        timeline.push(turn(Y,90),40);
+        for(int frame=0;frame<=30;frame++) timeline.at(frame*16);
+        check(Math.abs(yaw(timeline.at(500))-90)<.05,"La predicción continuó con el sensor detenido");
+        double before=yaw(timeline.at(500));
+        timeline.clear();
+        check(Math.abs(yaw(timeline.at(5000))-before)<.001,"Desconectar desplazó el modelo");
+        timeline.push(turn(Y,-40),5000);
+        check(Math.abs(yaw(timeline.at(5000))-before)<.001,"Reconectar saltó al primer paquete");
+        for(int frame=1;frame<=20;frame++) timeline.at(5000+frame*16);
+        check(Math.abs(yaw(timeline.at(5400))+40)<.05,"No recuperó el movimiento después de una pausa");
+        timeline.snap(turn(Y,0));
+        equal(timeline.at(6000),turn(Y,0),"Cero dejó muestras anteriores en el historial");
+        timeline.push(turn(Y,20),6040);
+        timeline.push(turn(Y,25),6040); // Millisecond resolution may produce equal timestamps.
+        check(Double.isFinite(timeline.at(6060).lengthSquared()),"Muestras simultáneas inválidas");
     }
 }

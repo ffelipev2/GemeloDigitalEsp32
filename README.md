@@ -20,7 +20,7 @@ Fotos del montaje electrónico y de la figura física de Cubone junto a su repre
 
 ## Instalar y usar
 
-1. En Arduino IDE, instala el núcleo **ESP32** y las bibliotecas **SparkFun BNO08x Cortex Based IMU** y **U8g2**. Selecciona una placa ESP32-C3 compatible y carga [`GemeloDigitalEsp32.ino`](GemeloDigitalEsp32.ino).
+1. En Arduino IDE, instala el núcleo **ESP32** y las bibliotecas **SparkFun BNO08x Cortex Based IMU** y **U8g2**. Selecciona una placa ESP32-C3 compatible y carga [`GemeloDigitalEsp32.ino`](GemeloDigitalEsp32/GemeloDigitalEsp32.ino).
 2. Conecta BNO08x al bus I²C: **SDA GPIO 5**, **SCL GPIO 6**, alimentación y tierra según tu módulo. El firmware usa la OLED SSD1306 integrada de **72 × 40 píxeles** en esos mismos pines. Muestra la conexión y el estado del sensor (**Sensor activo**, **Sin datos IMU** o **Sensor error**) en tres líneas centradas con fuente 5 × 8. El [controlador de U8g2 para 72 × 40](https://github.com/olikraus/u8g2/wiki/u8g2setupcpp#ssd1306-72x40_er) aplica el desplazamiento del panel; no se usan coordenadas de una pantalla 128 × 64.
 3. Instala [`android/GemeloDigitalBLE-debug.apk`](android/GemeloDigitalBLE-debug.apk) en la tablet, activa Bluetooth y abre **Gemelo Digital**.
 4. La app abre directamente el visor, también en la primera instalación. **Conectar** y **Calibrar** son acciones opcionales: elige cuándo usarlas. Toca la tarjeta **Bluetooth** para conectar y concede el permiso solicitado. También puedes usar **Conectar Bluetooth** dentro del asistente o del menú de ajustes.
@@ -48,7 +48,7 @@ En Android 11 o anterior, activa también la ubicación del sistema para permiti
 ## Archivos
 
 ```text
-GemeloDigitalEsp32.ino               Firmware BLE del ESP32-C3
+GemeloDigitalEsp32/GemeloDigitalEsp32.ino  Firmware BLE del ESP32-C3
 android/GemeloDigitalBLE-debug.apk   App Android instalable
 android/app/src/main/assets/         Modelo Cubone y guía del suelo en GLB
 android/app/src/main/java/           Cliente BLE, calibración y visor nativo
@@ -56,11 +56,11 @@ android/build-apk.ps1                Compilación local del APK
 docs/images/                        Fotos del prototipo y del gemelo digital
 ```
 
-La app guarda la transformación 3D de los ejes del sensor y la dirección de gravedad de la postura neutra en las preferencias de Android. Al reconectar recupera la inclinación neutra; el rumbo inicial de cada conexión se toma como cero porque el **Game Rotation Vector** del BNO08x no tiene referencia absoluta de rumbo. La animación interpola las muestras BLE con el suavizado anterior al filtro de vibración. El panel principal muestra los controles de calibración, Bluetooth y retorno a cero, el visor 3D ampliable y tarjetas con el estado y los ángulos de orientación.
+La app guarda la transformación 3D de los ejes del sensor y la dirección de gravedad de la postura neutra en las preferencias de Android. Al reconectar recupera la inclinación neutra; el rumbo inicial de cada conexión se toma como cero porque el **Game Rotation Vector** del BNO08x no tiene referencia absoluta de rumbo. La animación conserva un historial de muestras BLE, usa el instante de recepción y el reloj de cada fotograma para interpolar, y aplica un suavizado constante. El pequeño búfer de 50 ms absorbe las ráfagas de Bluetooth; con datos regulares, el retardo de la animación medido en la simulación es de unos 60–75 ms. Los controles y ángulos se actualizan a 10 Hz, sin refrescar todo el panel por cada paquete. El panel principal muestra los controles de calibración, Bluetooth y retorno a cero, el visor 3D ampliable y tarjetas con el estado y los ángulos de orientación.
 
 ## Protocolo BLE
 
-El ESP32 anuncia **CuboneESP32** con el servicio `6a59d32b-158a-4c76-8c7e-7a4a5ab48152`. La característica `6a59d32b-158a-4c76-8c7e-7a4a5ab48153` permite lectura y notificaciones. Cada muestra nueva contiene **18 bytes**: cuatro `float32` little-endian (`x, y, z, w`) y un contador `uint16` little-endian. El sensor solicita reportes cada 20 ms; las notificaciones se limitan a 25 Hz. La app también acepta paquetes anteriores de 16 bytes.
+El ESP32 anuncia **CuboneESP32** con el servicio `6a59d32b-158a-4c76-8c7e-7a4a5ab48152`. La característica `6a59d32b-158a-4c76-8c7e-7a4a5ab48153` permite lectura y notificaciones. Cada muestra nueva contiene **18 bytes**: cuatro `float32` little-endian (`x, y, z, w`) y un contador `uint16` little-endian. El sensor solicita reportes cada 20 ms; las notificaciones se programan a 25 Hz, con el último valor disponible y sin depender del instante de cada reporte del IMU. Android solicita una conexión BLE de baja latencia mediante [`requestConnectionPriority`](https://developer.android.com/reference/android/bluetooth/BluetoothGatt#requestConnectionPriority(int)). La OLED se actualiza únicamente al cambiar el estado y mantiene I²C a 400 kHz mediante [`setBusClock`](https://github.com/olikraus/u8g2/wiki/u8g2reference#setbusclock), para reducir las pausas en el bus compartido con el sensor. La app también acepta paquetes anteriores de 16 bytes.
 
 ## Reconstruir la app
 
@@ -77,3 +77,5 @@ Con el argumento de instrumentación `-e scope controls-motion` comprueba espec�
 Con `-e scope zero` comprueba **Cero** sin calibración en posturas inclinadas e invertidas, centrado del nodo nativo, movimiento relativo posterior y conservación de la referencia al girar la pantalla. También verifica el retorno a la postura guardada con calibración y que el botón no use lecturas antiguas ni interfiera con un asistente en curso.
 
 En este equipo quedó creado el emulador **Gemelo Digital API 35** para ejecutarlo desde el selector de dispositivos de Android Studio. La aceleración usa el controlador oficial AEHD de Google.
+
+Las pruebas de `android/tests/OrientationCoreTest.java` verifican los 24 montajes, interpolación a 30/60/90/120 Hz con retrasos BLE variables, ráfagas procesadas juntas, recuperación tras pausas y retorno a cero. Se pueden ejecutar sin Android: `javac -d android/.build/orientation-tests android/app/src/main/java/com/gemelodigital/esp32/OrientationCore.java android/tests/OrientationCoreTest.java`, seguido de `java -cp android/.build/orientation-tests com.gemelodigital.esp32.OrientationCoreTest`.

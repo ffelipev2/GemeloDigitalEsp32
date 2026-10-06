@@ -2,6 +2,7 @@ package com.gemelodigital.esp32;
 
 import android.content.Context;
 import android.content.res.ColorStateList;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.text.TextUtils;
@@ -371,7 +372,7 @@ final class NativeDashboard extends FrameLayout {
     private LinearLayout column() { LinearLayout v=new LinearLayout(getContext()); v.setOrientation(LinearLayout.VERTICAL); return v; }
     private LinearLayout row() { LinearLayout v=new LinearLayout(getContext()); v.setOrientation(LinearLayout.HORIZONTAL); return v; }
     private LinearLayout.LayoutParams spaced(int w,int h,int top,int bottom) { LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(w,h); p.topMargin=top; p.bottomMargin=bottom; return p; }
-    private TextView label(String value,float size,int color,boolean bold) { TextView v=new TextView(getContext()); v.setText(value); v.setTextSize(size); v.setTextColor(color); v.setIncludeFontPadding(false); if (bold) v.setTypeface(null,1); return v; }
+    private TextView label(String value,float size,int color,boolean bold) { TextView v=new TextView(getContext()); v.setText(value); v.setTextSize(size); v.setTextColor(color); v.setIncludeFontPadding(false); if (bold) v.setTypeface(null,Typeface.BOLD); return v; }
     private void singleLine(TextView v) { v.setSingleLine(true); v.setEllipsize(TextUtils.TruncateAt.END); }
     private void text(TextView v,String value) { if (!value.contentEquals(v.getText())) v.setText(value); }
     private String angle(double radians) { double degrees=radians*180/Math.PI; return String.format(Locale.US,"%.1f°",Math.abs(degrees)<.05?0:degrees); }

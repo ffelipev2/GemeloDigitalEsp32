@@ -135,37 +135,59 @@ final class OrientationCore {
     }
 
     static final class Timeline {
-        private Quat previous=Quat.identity(), latest=Quat.identity(), output=Quat.identity();
-        private double previousAt=0, latestAt=Double.NaN, frameAt=Double.NaN, intervalMs=40;
-        void clear() { latestAt=Double.NaN; previousAt=0; }
-        void snap(Quat q) { previous=q; latest=q; output=q; clear(); }
-        void push(Quat q, double now) {
-            if (Double.isNaN(latestAt) || now-latestAt>120) {
-                previous=output; previousAt=now-intervalMs;
-            } else {
-                double interval=now-latestAt;
-                if (interval<=0) { latest=q; return; }
-                previous=latest; previousAt=latestAt;
-                intervalMs+=0.2*(Math.max(25,Math.min(70,interval))-intervalMs);
-            }
-            latest=q; latestAt=now;
+        // Keep the segment for the delayed render time even when BLE callbacks arrive in bursts.
+        private static final int CAPACITY=16;
+        private static final double RENDER_DELAY_MS=50, FILTER_MS=25, RESET_GAP_MS=200;
+        private final Quat[] samples=new Quat[CAPACITY];
+        private final double[] times=new double[CAPACITY];
+        private int first, count;
+        private Quat output=Quat.identity();
+        private double frameAt=Double.NaN;
+
+        void clear() {
+            java.util.Arrays.fill(samples,null);
+            first=0; count=0; frameAt=Double.NaN;
         }
+        void snap(Quat q) { clear(); output=q; }
+
+        void push(Quat q, double now) {
+            if (!Double.isFinite(now)) return;
+            if (count>0) {
+                int last=index(count-1);
+                if (now<times[last]) return;
+                if (now==times[last]) { samples[last]=q; return; }
+                if (now-times[last]>RESET_GAP_MS) clear();
+            }
+            if (count==0) append(output,now-RENDER_DELAY_MS);
+            append(q,now);
+        }
+
+        private int index(int offset) { return (first+offset)%CAPACITY; }
+        private void append(Quat q,double now) {
+            if (count==CAPACITY) { samples[first]=null; first=index(1); count--; }
+            int slot=index(count++); samples[slot]=q; times[slot]=now;
+        }
+
         Quat at(double now) {
             double frameMs=Double.isNaN(frameAt)?16:Math.max(0,Math.min(100,now-frameAt));
             frameAt=now;
-            if (Double.isNaN(latestAt)) return output;
-            double interval=Math.max(1,latestAt-previousAt);
-            double renderAt=now-Math.max(25,Math.min(40,intervalMs*0.75));
-            double fraction=(renderAt-previousAt)/interval;
+            if (count==0) return output;
+            double renderAt=now-RENDER_DELAY_MS;
+            while (count>2 && times[index(1)]<=renderAt) {
+                samples[first]=null; first=index(1); count--;
+            }
+            int next=index(1);
+            double interval=Math.max(1,times[next]-times[first]);
+            double fraction=Math.max(0,(renderAt-times[first])/interval);
             if (fraction>1) {
-                double angle=previous.angleTo(latest);
-                double extraMs=Math.min(10,Math.max(0,renderAt-latestAt));
+                double angle=samples[first].angleTo(samples[next]);
+                // After a stopped feed, settle on the last measured pose instead of a prediction.
+                double extraMs=now-times[next]>120?0:Math.min(10,renderAt-times[next]);
                 fraction=1+Math.min(extraMs/interval,angle>0?(3*RAD)/angle:0);
             }
-            Quat renderTarget=previous.slerp(latest,Math.max(0,fraction));
-            double error=output.angleTo(renderTarget);
-            double filterMs=error<0.03?25:error<0.15?15:10;
-            output=output.slerp(renderTarget,1-Math.exp(-frameMs/filterMs));
+            Quat target=samples[first].slerp(samples[next],fraction);
+            // A fixed time constant avoids changing speed at angular-error thresholds.
+            output=output.slerp(target,1-Math.exp(-frameMs/FILTER_MS));
             return output;
         }
     }

@@ -89,7 +89,8 @@ public final class MainActivity extends ComponentActivity {
             @Override public void disconnect() { disconnectRequested(); }
         });
         dashboard.scene.setFrameListener(time -> {
-            long now = SystemClock.uptimeMillis();
+            // Use the display frame timestamp instead of UI callback execution time.
+            long now = time;
             OrientationCore.Quat displayed = orientation.frame(now);
             dashboard.scene.applyOrientation((float)displayed.x,(float)displayed.y,
                     (float)displayed.z,(float)displayed.w);
@@ -358,6 +359,13 @@ public final class MainActivity extends ComponentActivity {
         runOnUiThread(() -> {
             if (activeGatt != gatt || quaternionCharacteristic == null) return;
             cancelConnectionTimeout();
+            try {
+                // Orientation is a continuous stream; request a low-latency BLE connection.
+                gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH);
+            } catch (SecurityException error) {
+                failConnection(gatt, "Falta permiso Bluetooth");
+                return;
+            }
             feedStartedAtMs = SystemClock.elapsedRealtime();
             lastNotificationAtMs = notificationsEnabled ? feedStartedAtMs : 0;
             noDataShown = false;
@@ -372,6 +380,7 @@ public final class MainActivity extends ComponentActivity {
         if (activeGatt != gatt || !QUAT_UUID.equals(characteristicUuid)
                 || bytes == null || (bytes.length != 18 && bytes.length != 16)) return;
         long now = SystemClock.elapsedRealtime();
+        long receivedAtMs = SystemClock.uptimeMillis();
         if (notification) lastNotificationAtMs = now;
         ByteBuffer data = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
         float x = data.getFloat(), y = data.getFloat(), z = data.getFloat(), w = data.getFloat();
@@ -386,8 +395,8 @@ public final class MainActivity extends ComponentActivity {
         lastSampleAtMs = now;
         runOnUiThread(() -> {
             if (activeGatt == gatt) {
-                orientation.sample(x, y, z, w);
-                dashboard.refresh();
+                // Preserve reception timing even if the main thread handles queued packets together.
+                orientation.sample(x, y, z, w, receivedAtMs);
             }
         });
         if (previous == 0 || now - previous > 2500) {

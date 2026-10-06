@@ -61,13 +61,17 @@ final class OrientationController {
     }
 
     void sample(float x, float y, float z, float w) {
+        sample(x,y,z,w,SystemClock.uptimeMillis());
+    }
+
+    void sample(float x, float y, float z, float w, long receivedAtMs) {
+        if (lastSampleTime != 0 && receivedAtMs < lastSampleTime) return;
         double lengthSquared = x*x + y*y + z*z + w*w;
         if (!Float.isFinite(x) || !Float.isFinite(y) || !Float.isFinite(z) || !Float.isFinite(w)
                 || lengthSquared < 0.5 || lengthSquared > 1.5) return;
         sensor = new OrientationCore.Quat(x,y,z,w).normalized();
-        long now = SystemClock.uptimeMillis();
-        updateModelOrientation(now);
-        lastSampleTime = now;
+        updateModelOrientation(receivedAtMs);
+        lastSampleTime = receivedAtMs;
         stale = false;
     }
 

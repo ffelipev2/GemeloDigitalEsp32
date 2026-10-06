@@ -43,7 +43,8 @@ uint32_t lastImuSampleMs = 0;
 uint32_t lastImuRetryMs = 0;
 uint32_t lastReportRetryMs = 0;
 uint32_t lastBleSendMs = 0;
-uint32_t lastDisplayMs = 0;
+uint16_t lastNotifiedSequence = 0;
+int8_t displayedStatus = -1;
 uint32_t lastSerialMs = 0;
 
 class CuboneBleCallbacks : public BLEServerCallbacks {
@@ -93,16 +94,21 @@ void drawStatusLine(uint8_t baseline, const char* text) {
 }
 
 void drawStatus(uint32_t now) {
-  if (now - lastDisplayMs < 1000) return;
-  lastDisplayMs = now;
+  const bool connected = bleConnected;
+  const uint8_t sensorStatus = !imuReady ? 0
+    : (sequence == 0 || now - lastImuSampleMs > IMU_STALE_MS) ? 1 : 2;
+  const int8_t status = static_cast<int8_t>(sensorStatus + (connected ? 4 : 0));
+  // La OLED comparte I2C con el IMU: no bloquear el sensor reenviando texto idéntico.
+  if (status == displayedStatus) return;
+  displayedStatus = status;
   u8g2.clearBuffer();
   // Tres lineas con margen vertical y mensajes ajustados a los 72 pixeles de ancho.
   u8g2.setFont(u8g2_font_5x8_tr);
   drawStatusLine(9, "CuboneESP32");
-  drawStatusLine(21, bleConnected ? "App conectada" : "Esperando app");
-  if (!imuReady) {
+  drawStatusLine(21, connected ? "App conectada" : "Esperando app");
+  if (sensorStatus == 0) {
     drawStatusLine(33, "Sensor error");
-  } else if (sequence == 0 || now - lastImuSampleMs > IMU_STALE_MS) {
+  } else if (sensorStatus == 1) {
     drawStatusLine(33, "Sin datos IMU");
   } else {
     drawStatusLine(33, "Sensor activo");
@@ -113,6 +119,7 @@ void drawStatus(uint32_t now) {
 void setup() {
   Serial.begin(115200);
   Wire.begin(SDA_PIN, SCL_PIN, 400000);
+  u8g2.setBusClock(400000);
   u8g2.begin();
   u8g2.setContrast(255);
   startImu();
@@ -157,15 +164,21 @@ void loop() {
     };
     // Actualizar también sin cliente permite que la app lea el valor más reciente.
     bleQuaternion->setValue(reinterpret_cast<const uint8_t*>(&sample), sizeof(sample));
-    if (bleConnected && now - lastBleSendMs >= BLE_INTERVAL_MS) {
-      bleQuaternion->notify();
-      lastBleSendMs = now;
-    }
     if (now - lastSerialMs >= 2000) {
       Serial.printf("IMU #%u BLE=%d q=%.3f,%.3f,%.3f,%.3f\n",
         sequence, bleConnected, sample.x, sample.y, sample.z, sample.w);
       lastSerialMs = now;
     }
+  }
+
+  // Publicar el valor más reciente a cadencia fija, independiente del instante del reporte IMU.
+  const uint32_t sendNow = millis();
+  if (bleConnected && sequence != 0 && sequence != lastNotifiedSequence
+      && sendNow - lastBleSendMs >= BLE_INTERVAL_MS) {
+    bleQuaternion->notify();
+    lastNotifiedSequence = sequence;
+    // Mantener la fase evita alternar huecos de 40/60 ms por pequeños retrasos del sensor.
+    lastBleSendMs += ((sendNow - lastBleSendMs) / BLE_INTERVAL_MS) * BLE_INTERVAL_MS;
   }
 
   drawStatus(now);
