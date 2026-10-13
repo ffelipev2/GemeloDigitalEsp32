@@ -1,6 +1,6 @@
 # GemeloDigitalEsp32
 
-Gemelo digital de orientación para un ESP32 (ESP32-C3 o ESP32-S3) y un BNO08x. El ESP32 envía las muestras **solo por Bluetooth Low Energy (BLE)**. La app Android dibuja a Cubone de forma nativa con SceneView y Filament; no hay red Wi-Fi, servidor web ni carga de LittleFS.
+Gemelo digital de orientación para un ESP32-C3 y un BNO08x. El ESP32 envía las muestras **solo por Bluetooth Low Energy (BLE)**. La app Android dibuja a Cubone de forma nativa con SceneView y Filament; no hay red Wi-Fi, servidor web ni carga de LittleFS.
 
 ## Registro fotográfico
 
@@ -20,8 +20,8 @@ Fotos del montaje electrónico y de la figura física de Cubone junto a su repre
 
 ## Instalar y usar
 
-1. En Arduino IDE, instala el núcleo **ESP32** y las bibliotecas **SparkFun BNO08x Cortex Based IMU** y **U8g2**. Selecciona la placa correspondiente al chip conectado (ESP32-C3 o ESP32-S3) y carga [`GemeloDigitalEsp32.ino`](GemeloDigitalEsp32/GemeloDigitalEsp32.ino).
-2. Conecta BNO08x al bus I²C: **SDA GPIO 8**, **SCL GPIO 9**, alimentación y tierra según tu módulo. Estos son los pines de la configuración actual; ajusta `SDA_PIN` y `SCL_PIN` si tu montaje utiliza otros. El firmware usa una OLED SSD1306 de **72 × 40 píxeles** en esos mismos pines. Muestra la conexión y el estado del sensor (**Sensor activo**, **Sin datos IMU** o **Sensor error**) en tres líneas centradas con fuente 5 × 8. El [controlador de U8g2 para 72 × 40](https://github.com/olikraus/u8g2/wiki/u8g2setupcpp#ssd1306-72x40_er) aplica el desplazamiento del panel; no se usan coordenadas de una pantalla 128 × 64.
+1. En Arduino IDE, instala el núcleo **ESP32** y las bibliotecas **SparkFun BNO08x Cortex Based IMU** y **U8g2**. Selecciona una placa ESP32-C3 compatible y carga [`GemeloDigitalEsp32.ino`](GemeloDigitalEsp32/GemeloDigitalEsp32.ino).
+2. Conecta BNO08x al bus I²C: **SDA GPIO 5**, **SCL GPIO 6**, alimentación y tierra según tu módulo. El firmware usa la OLED SSD1306 integrada de **72 × 40 píxeles** en esos mismos pines. Muestra la conexión y el estado del sensor (**Sensor activo**, **Sin datos IMU** o **Sensor error**) en tres líneas centradas con fuente 5 × 8. El [controlador de U8g2 para 72 × 40](https://github.com/olikraus/u8g2/wiki/u8g2setupcpp#ssd1306-72x40_er) aplica el desplazamiento del panel; no se usan coordenadas de una pantalla 128 × 64.
 3. Instala [`android/GemeloDigitalBLE-debug.apk`](android/GemeloDigitalBLE-debug.apk) en la tablet, activa Bluetooth y abre **Gemelo Digital**.
 4. La app abre directamente el visor, también en la primera instalación. **Conectar** y **Calibrar** son acciones opcionales: elige cuándo usarlas. Toca la tarjeta **Bluetooth** para conectar y concede el permiso solicitado. También puedes usar **Conectar Bluetooth** dentro del asistente o del menú de ajustes.
 5. El modelo se mueve en cuanto llegan lecturas del sensor, incluso sin calibración. En ese caso usa los ejes nominales del BNO08x y toma la primera lectura de cada conexión como referencia temporal, sin guardar una calibración. Cuando quieras adaptar los ejes al montaje físico, toca **Calibrar**. El asistente pedirá tres posturas del dispositivo: neutra, inclinado hacia adelante e inclinado hacia la derecha. Mantén cada postura quieta y pulsa **Continuar**. Antes de inclinarlo a la derecha, vuelve a la postura neutra. Puedes salir con **Cancelar** o **Atrás**, incluso sin una calibración previa; el panel deja accesibles los controles del visor.
@@ -39,8 +39,6 @@ Todas las acciones funcionan igual en vertical y horizontal, incluido el asisten
 
 En Android 11 o anterior, activa también la ubicación del sistema para permitir el escaneo BLE. No necesitas emparejar el ESP32 en los ajustes de Android ni conectar la tablet a una red Wi-Fi.
 
-Para el ESP32-S3 con **8 MB de flash** de la última carga, se usó **ESP32S3 Dev Module**, **Flash Size: 8MB**, **USB Mode: Hardware CDC and JTAG**, **USB CDC On Boot: Enabled** y **PSRAM: Disabled**. La conexión USB nativa permite ver el monitor serie a 115200 baudios. Esta configuración corresponde al FQBN `esp32:esp32:esp32s3:FlashSize=8M,USBMode=hwcdc,CDCOnBoot=cdc,UploadMode=default,PSRAM=disabled`.
-
 ## Si Cubone deja de moverse
 
 - Si el botón dice **Sin datos**, revisa la OLED. **Sin datos IMU** indica que el sensor dejó de entregar orientación; revisa alimentación y los cables I²C. El firmware intenta reactivar los reportes automáticamente.
@@ -50,7 +48,7 @@ Para el ESP32-S3 con **8 MB de flash** de la última carga, se usó **ESP32S3 De
 ## Archivos
 
 ```text
-GemeloDigitalEsp32/GemeloDigitalEsp32.ino  Firmware BLE del ESP32-C3 / ESP32-S3
+GemeloDigitalEsp32/GemeloDigitalEsp32.ino  Firmware BLE del ESP32-C3
 android/GemeloDigitalBLE-debug.apk   App Android instalable
 android/app/src/main/assets/         Modelo Cubone y guía del suelo en GLB
 android/app/src/main/java/           Cliente BLE, calibración y visor nativo
