@@ -6,8 +6,8 @@
 #include <BLE2902.h>
 #include "SparkFun_BNO08x_Arduino_Library.h"
 
-constexpr int SDA_PIN = 5;
-constexpr int SCL_PIN = 6;
+constexpr int SDA_PIN = 8;
+constexpr int SCL_PIN = 9;
 constexpr uint16_t SENSOR_INTERVAL_MS = 20; // 50 Hz
 constexpr uint32_t BLE_INTERVAL_MS = 40;     // 25 Hz
 constexpr uint32_t IMU_RETRY_MS = 5000;
